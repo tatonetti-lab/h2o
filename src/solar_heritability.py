@@ -74,7 +74,7 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, ethnicities, min_ascer
         for fid in family_ids_only:
             if fam2count[fid] < min_ascertained:
                 continue
-            if ethnicity != 'ALL' and not fam2eth[row[0]] == ethnicity:
+            if ethnicity != 'ALL' and not fam2eth[fid] == ethnicity:
                 continue
             
             for iid in fam2empi[fid]:
@@ -141,9 +141,8 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, ethnicities, min_ascer
     
     return run_list
 
-def single_solar_run(h2_path, run_list, verbose = True):
+def single_solar_run(h2_path, run_list, ethnicity, verbose = True):
     
-    ethnicity = 'ALL'
     for rid in run_list[ethnicity]:
         solar_working_path = os.path.join(h2_path, ethnicity, 'wd%d' % rid)
         

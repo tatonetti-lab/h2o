@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 """
 solarStrap_heritability.py
 
@@ -7,7 +9,7 @@ Compute heritability for one or more traits.
 
 USAGE EXAMPLE
 -------------
-python heritability_allicd9s.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [sd=path/to/working_directory]
+python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [sd=path/to/working_directory]
 
 """
 
@@ -38,7 +40,7 @@ common_data_path = ''
 
 def solar(input_args):
     h2_path, families_with_case, icd9, \
-        num_families, iid2ped, all_traits, ethnicities, \
+        num_families, iid2ped, all_traits, ethnicity, \
         min_ascertained, fam2empi, fam2eth, all_fam2count, \
         all_fam2proband, use_proband, binarytrait = input_args
     
@@ -54,7 +56,7 @@ def solar(input_args):
     run_list = build_solar_directories(h2_path,
                                        iid2ped,
                                        all_traits[icd9],
-                                       ethnicities,
+                                       [ethnicity],
                                        min_ascertained,
                                        fam2empi,
                                        fam2eth,
@@ -63,8 +65,8 @@ def solar(input_args):
                                        use_proband,
                                        verbose=False,
                                        family_ids_only = chosen_families)
-
-    results = single_solar_run(h2_path, run_list, verbose=False)
+    
+    results = single_solar_run(h2_path, run_list, ethnicity, verbose=False)
     if len(results[0]) != 0:
         h2, h2err, pval = zip(*results)[0]
     else:
@@ -82,24 +84,24 @@ def solar_strap(input_args):
     """
     
     num_families, families_with_case, icd9, _max_significant_, _max_attempts_, \
-        solar_dir, iid2ped, all_traits, ethnicities, min_ascertained, fam2empi, \
+        solar_dir, iid2ped, all_traits, ethnicity, min_ascertained, fam2empi, \
         fam2eth, all_fam2count, all_fam2proband, use_proband, verbose, binarytrait = input_args
-
+    
     if num_families > len(families_with_case[icd9]):
         print >> sys.stderr, "Number of families large than what is available."
         return num_families, list(), 0, 0
-
+    
     h2s = list()
     num_attempts = 0
     num_successes = 0
     num_significant = 0
-
+    
     while num_significant < _max_significant_ and num_attempts < _max_attempts_:
-
+        
         num_attempts += 1
-
+        
         start_time = time.time()
-
+        
         h2_path = os.path.join(solar_dir, icd9, 'h2_%d_%s' % (num_families, random_string(5)))
         h2, h2err, pval = solar((h2_path,
                         families_with_case,
@@ -107,7 +109,7 @@ def solar_strap(input_args):
                         num_families,
                         iid2ped,
                         all_traits,
-                        ethnicities,
+                        ethnicity,
                         min_ascertained,
                         fam2empi,
                         fam2eth,
@@ -126,7 +128,7 @@ def solar_strap(input_args):
         denoise_eps = 0.05
         
         if h2 is None or h2err is None or float(h2) < edge_eps or float(h2) > (1-edge_eps):
-            print "%7d %10s %10s %10s %5d %5d %7.2f %7.2fs" % (num_families, h2, h2err, pval, num_significant, num_successes, num_significant/max(1.0,float(num_successes)), run_time)
+            print "%20s %7d %10s %10s %10s %5d %5d %7.2f %7.2fs" % (ethnicity, num_families, h2, h2err, pval, num_significant, num_successes, num_significant/max(1.0,float(num_successes)), run_time)
             continue
         
         if float(h2err) < denoise_eps*float(h2):
@@ -138,7 +140,7 @@ def solar_strap(input_args):
             num_significant += 1
             h2s.append(h2)
             if verbose:
-                print "%7d %10s %10s %10s %5d %5d %7.2f %7.2fs" % (num_families, h2, h2err, pval, num_significant, num_successes, num_significant/float(num_successes), run_time)
+                print "%20s %7d %10s %10s %10s %5d %5d %7.2f %7.2fs" % (ethnicity, num_families, h2, h2err, pval, num_significant, num_successes, num_significant/float(num_successes), run_time)
     
     return num_families, h2s, num_significant, num_successes
 
@@ -153,7 +155,7 @@ def prevelance(trait):
     prevelance = n_affected/float(n_unaffected+n_affected)
     return n_affected, n_unaffected, prevelance
 
-def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, trait_type, diag_slice=None):
+def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, trait_type, diag_slice=None, ethnicities=None):
     
     if trait_type == 'D':
         use_proband = True
@@ -262,49 +264,62 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
     
     eth2fam, fam2eth = assign_family_ethnicities(fam2empi, empi2demog)
     
+    if ethnicities is None:
+        ethnicities = ['ALL']
+    elif ethnicities == 'each':
+        ethnicities = ['ALL'] + eth2fam.keys()
+    
+    print >> sys.stderr, "Evaluating %d ethnicities: %s" % (len(ethnicities), ', '.join(ethnicities))
+    
     if _DT_:
         min_ascertained = 1
     if _QT_:
         min_ascertained = 2
     
-    for icd9 in diags_to_process:
-        
-        print >> sys.stderr, "Running solarStrap analysis for %s" % icd9
-        
-        icd9_path = os.path.join(solar_dir, icd9)
-        if not os.path.exists(icd9_path):
-            os.mkdir(icd9_path)
+    _max_significant_ = 200
+    _max_attempts_ = 200
+    
+    #step_factor = 1 # every 100, 1000, 10000
+    #step_factor = 2 # every 200, 2000, 20000
+    step_factor = 3 # every 300, 3000, 30000
+    
+    num_families_range = (i*10**exp for exp in range(2, 4) for i in range(1, 11, step_factor))
+    
+    for num_families in num_families_range:
+        for icd9 in diags_to_process:
             
-        h2_path = os.path.join(solar_dir, icd9, 'h2')
+            print >> sys.stderr, "Running solarStrap analysis for %s" % icd9
         
-        print >> sys.stderr, "Number of families with case: %d" % (len(families_with_case[icd9]))
-        
-        _max_significant_ = 200
-        _max_attempts_ = 200
-        
-        num_families_range = (i*10**exp for exp in range(2, 5) for i in range(1, 11))
-        
-        for num_families in num_families_range:
-            nf, h2values, num_significant, num_successes = solar_strap((num_families,
-                                                                        families_with_case,
-                                                                        icd9,
-                                                                        _max_significant_,
-                                                                        _max_attempts_,
-                                                                        solar_dir,
-                                                                        iid2ped,
-                                                                        all_traits,
-                                                                        ['ALL'],
-                                                                        min_ascertained,
-                                                                        fam2empi,
-                                                                        fam2eth,
-                                                                        all_fam2count,
-                                                                        all_fam2proband,
-                                                                        use_proband,
-                                                                        True,
-                                                                        _DT_))
-            if len(h2values) >= 3:
-                medi = int(numpy.floor(len(h2values)/2))
-                print >> sys.stdout, "SUMMARY: ", icd9, nf, num_significant, num_successes, h2values[medi], numpy.percentile(h2values, 2.5), numpy.percentile(h2values, 97.5)
+            icd9_path = os.path.join(solar_dir, icd9)
+            if not os.path.exists(icd9_path):
+                os.mkdir(icd9_path)
+            
+            h2_path = os.path.join(solar_dir, icd9, 'h2')
+            
+            print >> sys.stderr, "Number of families with case: %d" % (len(families_with_case[icd9]))
+            
+            for eth in ethnicities:
+                
+                nf, h2values, num_significant, num_successes = solar_strap((num_families,
+                                                                            families_with_case,
+                                                                            icd9,
+                                                                            _max_significant_,
+                                                                            _max_attempts_,
+                                                                            solar_dir,
+                                                                            iid2ped,
+                                                                            all_traits,
+                                                                            eth,
+                                                                            min_ascertained,
+                                                                            fam2empi,
+                                                                            fam2eth,
+                                                                            all_fam2count,
+                                                                            all_fam2proband,
+                                                                            use_proband,
+                                                                            True,
+                                                                            _DT_))
+                if len(h2values) >= 3:
+                    medi = int(numpy.floor(len(h2values)/2))
+                    print >> sys.stdout, "SUMMARY: ", icd9, eth, nf, num_significant, num_successes, h2values[medi], numpy.percentile(h2values, 2.5), numpy.percentile(h2values, 97.5)
 
 if __name__ == '__main__':
     args = dict([x.split('=') for x in sys.argv[1:]])
@@ -318,4 +333,5 @@ if __name__ == '__main__':
         trait_path = args['trait'],
         solar_dir = args['sd'],
         trait_type = args['type'],
-        diag_slice = None if not 'slice' in args else map(int, args['slice'].split('-')))
+        diag_slice = None if not 'slice' in args else map(int, args['slice'].split('-')),
+        ethnicities = None if not 'eth' in args else args['eth'])
