@@ -88,7 +88,7 @@ def solar_strap(input_args):
         fam2eth, all_fam2count, all_fam2proband, use_proband, verbose, binarytrait = input_args
     
     if num_families > len(families_with_case[icd9]):
-        print >> sys.stderr, "Number of families large than what is available."
+        print >> sys.stderr, "Number of families larger than what is available."
         return num_families, list(), 0, 0
     
     h2s = list()
