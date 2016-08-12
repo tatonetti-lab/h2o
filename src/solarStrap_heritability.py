@@ -220,10 +220,17 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
             print >> sys.stderr, "%10s %13d" % (trait, ncases)
     
     if not diag_slice is None:
-        start = diag_slice[0]
-        stop = diag_slice[1]
-        diags_to_process = available_diagnoses[start:stop]
+        if len(diag_slice) == 1:
+            start = diag_slice[0]
+            stop = diag_slice[0] + 1
+        elif len(diag_slice) == 2:
+            start = diag_slice[0]
+            stop = diag_slice[1]
+        else:
+            raise Exception("ERROR: Slice provided in unexpected format: %s" % diag_slice)
         
+        diags_to_process = available_diagnoses[start:stop]
+    
     print >> sys.stderr, "Loading ascertainment counts..."
     
     all_fam2count = defaultdict(dict)
