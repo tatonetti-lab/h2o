@@ -454,16 +454,9 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, _num_attempt
     if num_families > len(families_with_case[icd9]):
         print >> sys.stderr, "Number of families to be sampled (%d) is larger than what is available (%d)." % (num_families, len(families_with_case[icd9]))
     else:
-        num_attempts = 0
+        if verbose:
+            print >> sys.stderr, "%10s %15s %5s %5s %7s %7s %10s %7s %7s %10s" % ('Trait', 'Ethnicity', 'NFam', 'Samp', 'AE h2', 'err', 'pval', 'ACE h2', 'err', 'pval')
         for i in range(_num_attempts_):
-            if not verbose:
-                if i == 0:
-                    print >> sys.stderr, "|",
-                elif i % int(_num_attempts_*0.05) == 0:
-                    print >> sys.stderr, ".",
-                elif i == (_num_attempts_-1):
-                    print >> sys.stderr, "|"
-        
             h2_path = os.path.join(solar_dir, icd9, 'h2_%d_%s' % (num_families, random_string(5)))
             single_results = solar(h2_path,
                             families_with_case,
@@ -485,6 +478,29 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, _num_attempt
             
             ae_h2r_results.append((single_results['AE']['h2r'], single_results['AE']['err'], single_results['AE']['pvalue']))
             ace_h2r_results.append((single_results['ACE']['h2r'], single_results['ACE']['err'], single_results['ACE']['pvalue']))
+            if verbose:
+
+                aeh2 = single_results['AE']['h2r']
+                aeer = single_results['AE']['err']
+                aepv = single_results['AE']['pvalue']
+                if aeh2 is None:
+                    aeh2 = numpy.nan
+                if aeer is None:
+                    aeer = numpy.nan
+                if aepv is None:
+                    aepv = numpy.nan
+                
+                aceh2 = single_results['ACE']['h2r']
+                aceer = single_results['ACE']['err']
+                acepv = single_results['ACE']['pvalue']
+                if aceh2 is None:
+                    aceh2 = numpy.nan
+                if aceer is None:
+                    aceer = numpy.nan
+                if acepv is None:
+                    acepv = numpy.nan
+                
+                print >> sys.stderr, "%10s %15s %5d %5d %7.2f %7.2f %10.2e %7.2f %7.2f %10.2e" % (icd9, eth, num_families, i+1, aeh2, aeer, aepv, aceh2, aceer, acepv)
     
     return ae_h2r_results, ace_h2r_results
 
@@ -574,7 +590,7 @@ def single_solar_run(h2_path, house=False, verbose=False, really_verbose=False):
     else:
         ace_results = {'h2r':None, 'err':None, 'pvalue':None}
     
-    if verbose:
+    if really_verbose:
         print >> sys.stderr, 'AE', "%(h2r)s %(err)s %(pvalue)s" % ae_results
         if house:
             print >> sys.stderr, 'ACE', "%(h2r)s %(err)s %(pvalue)s" % ace_results
