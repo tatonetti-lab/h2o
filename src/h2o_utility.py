@@ -401,7 +401,19 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, min_ascertained, fam2e
     
     return
 
-def estimate_h2o(h2r_results):
+def extract_convered_estimates(h2r_results, edge_eps, denoise_eps):
+    converged = list()
+    for h2, h2err, pval in h2r_results:
+        if h2 == None or h2err == None or h2 < edge_eps or h2 > (1-edge_eps):
+            continue
+
+        if h2err < denoise_eps*h2:
+            continue
+
+        converged.append( (h2, h2err, pval) )
+    return converged
+
+def estimate_h2o(h2r_results, ci = 95.):
     
     num_converged = 0
     num_significant = 0
@@ -412,15 +424,10 @@ def estimate_h2o(h2r_results):
     edge_eps = 1e-9
     denoise_eps = 0.05
     
-    for h2, h2err, pval in h2r_results:
-        if h2 == None or h2err == None or h2 < edge_eps or h2 > (1-edge_eps):
-            continue
-        
-        if h2err < denoise_eps*h2:
-            continue
-        
-        num_converged += 1
-        
+    converged = extract_convered_estimates(h2r_results, edge_eps, denoise_eps)
+    num_converged = len(converged)
+    
+    for h2, h2err, pval in converged:    
         if pval < pcutoff:
             num_significant += 1
             sig_h2s.append((h2, h2err, pval))
@@ -433,10 +440,11 @@ def estimate_h2o(h2r_results):
         print >> sys.stderr, "WARNING: There are fewer than 30 (%d) significant and converged estimates." % num_significant
     
     h2o, solarerr, solarpval = sorted(sig_h2s)[len(sig_h2s)/2]
+    h2o_estimates = zip(*sig_h2s)[0]
     
-    h2olo = numpy.percentile(sig_h2s, 2.5)
-    h2ohi = numpy.percentile(sig_h2s, 97.5)
-    
+    cidiff = (100.-ci)/2.
+    h2olo = numpy.percentile(h2o_estimates, cidiff)
+    h2ohi = numpy.percentile(h2o_estimates, 100.-cidiff)
     posa = num_significant/float(num_converged)
     
     return h2o, h2olo, h2ohi, solarerr, solarpval, num_converged, num_significant, posa 

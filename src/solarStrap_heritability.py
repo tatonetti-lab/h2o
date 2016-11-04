@@ -9,9 +9,11 @@ Compute heritability for one or more traits.
 
 USAGE EXAMPLE
 -------------
-python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [sd=path/to/working_directory] [ace=yes] [verbose=yes]
+python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [nfam=500] [sd=path/to/working_directory] [ace=yes] [verbose=yes]
 
 """
+__version__ = 0.9
+
 
 import os
 import sys
@@ -45,7 +47,7 @@ from h2o_utility import TRAIT_TYPE_QUANTITATIVE
 
 common_data_path = ''
 
-def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, trait_type, diag_slice=None, ethnicities=None, verbose=False, house=False):
+def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix=''):
     
     if trait_type == 'D':
         trait_type_code = TRAIT_TYPE_BINARY
@@ -171,19 +173,22 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
     
     num_attempts = 200
     
-    #step_factor = 1 # every 100, 1000, 10000
-    #step_factor = 2 # every 200, 2000, 20000
-    step_factor = 3 # every 300, 3000, 30000
-    
-    num_families_range = (i*10**exp for exp in range(2, 4) for i in range(1, 11, step_factor))
-    
-    results_file = open(os.path.join(solar_dir, 'solar_strap_results.csv'), 'w')
+    results_file = open(os.path.join(solar_dir, '%s_solar_strap_results.csv' % prefix), 'w')
     results_writer = csv.writer(results_file)
-
     results_writer.writerow(['trait', 'ethnicity', 'num_families', 'model', 'h2o', 'h2o_lower', 'h2o_upper', 'solarerr', 'solarpval', 'num_attempts', 'num_converged', 'num_significant', 'posa'])
     
+    runs_file = open(os.path.join(solar_dir, '%s_solar_strap_allruns.csv' % prefix), 'w')
+    runs_writer = csv.writer(runs_file)
+    runs_writer.writerow(['trait', 'ethnicity', 'num_families', 'model', 'h2o', 'solarerr', 'pvalue'])
+    
+    if num_families_range is None:
+        num_families_range = [0.15,]
+
     for num_families in num_families_range:
         for icd9 in diags_to_process:
+            
+            if type(num_families) == float:
+                num_families = max(500, int(num_families*len(families_with_case[icd9])))
             
             print >> sys.stderr, "Running solarStrap analysis for %s, num_fam = %d" % (icd9, num_families)
             print >> sys.stderr, " AE: yes, ACE: %s" % ('yes' if house else 'no')
@@ -219,6 +224,9 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                                                               use_proband,
                                                               house,
                                                               verbose)
+                for h2o, err, pval in ae_h2r_results:
+                    runs_writer.writerow([icd9, eth, num_families, 'AE', h2o, err, pval])
+                
                 estimates = estimate_h2o(ae_h2r_results)
                 if estimates:
                     h2o, h2olo, h2ohi, solarerr, solarpval, num_converged, num_significant, posa = estimates
@@ -226,13 +234,17 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                     results_writer.writerow([icd9, eth, num_families, 'AE', h2o, h2olo, h2ohi, solarerr, solarpval, num_attempts, num_converged, num_significant, posa])
                 
                 if house:
+                    for h2o, err, pval in ace_h2r_results:
+                        runs_writer.writerow([icd9, eth, num_families, 'ACE', h2o, err, pval])
+                        
                     estimates = estimate_h2o(ace_h2r_results)
                     if estimates:
                         h2o, h2olo, h2ohi, solarerr, solarpval, num_converged, num_significant, posa = estimates
                         print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'ACE', h2o, solarerr, solarpval, num_attempts, num_converged, num_significant, posa)
-                        results_writer.writerow([icd9, eth, num_families, 'AE', h2o, h2olo, h2ohi, solarerr, solarpval, num_attempts, num_converged, num_significant, posa])
+                        results_writer.writerow([icd9, eth, num_families, 'ACE', h2o, h2olo, h2ohi, solarerr, solarpval, num_attempts, num_converged, num_significant, posa])
 
     results_file.close()
+    runs_file.close()
 
 if __name__ == '__main__':
     args = dict([x.split('=') for x in sys.argv[1:]])
@@ -240,13 +252,25 @@ if __name__ == '__main__':
     if not 'sd' in args:
         args['sd'] = './working'
     
+    if not 'name' in args:
+        args['name'] = random_string(5)
+    
+    print >> sys.stderr, ""
+    print >> sys.stderr, "SolarStrap v%4.1f - Estimate heritability of disease using observational data." % __version__
+    print >> sys.stderr, "-----------------------------------------------------------------------------"
+    print >> sys.stderr, "Summary results will be saved in %(sd)s/%(name)s_solar_strap_results.csv" % args
+    print >> sys.stderr, "Results from each bootstrap will be saved at %(sd)s/%(name)s_solar_strap_allruns.csv" % args
+    print >> sys.stderr, ""
+    
     main(demographic_file = args['demog'],
         family_file = args['fam'],
         pedigree_file = args['ped'],
         trait_path = args['trait'],
         solar_dir = args['sd'],
         trait_type = args['type'],
+        num_families_range = None if not 'nfam' in args else map(int, args['nfam'].split(',')),
         diag_slice = None if not 'slice' in args else map(int, args['slice'].split('-')),
         ethnicities = None if not 'eth' in args else args['eth'],
         verbose = False if not 'verbose' in args else args['verbose'].lower() == 'yes',
-        house = False if not 'ace' in args else args['ace'].lower() == 'yes')
+        house = False if not 'ace' in args else args['ace'].lower() == 'yes',
+        prefix = args['name'])
