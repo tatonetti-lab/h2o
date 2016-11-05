@@ -15,6 +15,9 @@ import random
 from tqdm import tqdm
 from collections import defaultdict
 
+import multiprocessing as mp
+import time
+
 # Define some constants
 TRAIT_TYPE_QUANTITATIVE = 0
 TRAIT_TYPE_BINARY = 1
@@ -289,7 +292,7 @@ def load_generic_pedigree(generic_ped_path, empi2sex, empi2age):
     
     return iid2ped
 
-def build_solar_directories(h2_path, iid2ped, empi2trait, min_ascertained, fam2empi, fam2count, fam2proband, use_proband, trait_type, verbose = True, family_ids_only = None):
+def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, fam2proband, use_proband, trait_type, verbose = True, family_ids_only = None):
     """
     Build the directories with files needed to run SOLAR a single time.
     """
@@ -309,7 +312,7 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, min_ascertained, fam2e
     
     trait_ped = list()
     for famid in family_ids_only:
-        if fam2count[famid] < min_ascertained:
+        if fam2count[famid] < 2:
             continue
         
         for pid in fam2empi[famid]:
@@ -319,7 +322,7 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, min_ascertained, fam2e
     
     if verbose:
         print >> sys.stderr, "ok."
-        print >> sys.stderr, "Found %d individuals that are members of families with at least %d acertained individual(s)." % (len(trait_ped), min_ascertained)
+        print >> sys.stderr, "Found %d individuals that are members of families with at least 2 acertained individual(s)." % len(trait_ped)
     
     # solar can't handle more than 32K individuals in a pedigree file, if you are using solar you should turn this back on
     if len(trait_ped) > 32000:
@@ -449,7 +452,7 @@ def estimate_h2o(h2r_results, ci = 95.):
     
     return h2o, h2olo, h2ohi, solarerr, solarpval, num_converged, num_significant, posa 
 
-def solar_strap(num_families, families_with_case, icd9, trait_type, _num_attempts_, solar_dir, iid2ped, all_traits, eth, min_ascertained, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house=False, verbose=False):
+def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts, solar_dir, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house=False, nprocs=1, verbose=False):
     """
     Run the bootstrapping algorithm to estimate the observational heritability for both
     the AE and ACE (if house=True) models of heritability. Results of this funciton can be parsed with 
@@ -458,36 +461,10 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, _num_attempt
         
     ae_h2r_results = list()
     ace_h2r_results = list()
-    
-    if num_families > len(families_with_case[icd9]):
-        print >> sys.stderr, "Number of families to be sampled (%d) is larger than what is available (%d)." % (num_families, len(families_with_case[icd9]))
-    else:
+    def log_solar_results(single_results):
+        ae_h2r_results.append((single_results['AE']['h2r'], single_results['AE']['err'], single_results['AE']['pvalue']))
+        ace_h2r_results.append((single_results['ACE']['h2r'], single_results['ACE']['err'], single_results['ACE']['pvalue']))
         if verbose:
-            print >> sys.stderr, "%10s %15s %5s %5s %7s %7s %10s %7s %7s %10s" % ('Trait', 'Ethnicity', 'NFam', 'Samp', 'AE h2', 'err', 'pval', 'ACE h2', 'err', 'pval')
-        for i in range(_num_attempts_):
-            h2_path = os.path.join(solar_dir, icd9, 'h2_%d_%s' % (num_families, random_string(5)))
-            single_results = solar(h2_path,
-                            families_with_case,
-                            icd9,
-                            trait_type,
-                            num_families,
-                            iid2ped,
-                            all_traits,
-                            eth,
-                            min_ascertained,
-                            fam2empi,
-                            fam2eth,
-                            all_fam2count,
-                            all_fam2proband,
-                            use_proband,
-                            house,
-                            verbose)
-            shutil.rmtree(h2_path)
-            
-            ae_h2r_results.append((single_results['AE']['h2r'], single_results['AE']['err'], single_results['AE']['pvalue']))
-            ace_h2r_results.append((single_results['ACE']['h2r'], single_results['ACE']['err'], single_results['ACE']['pvalue']))
-            if verbose:
-
                 aeh2 = single_results['AE']['h2r']
                 aeer = single_results['AE']['err']
                 aepv = single_results['AE']['pvalue']
@@ -508,11 +485,44 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, _num_attempt
                 if acepv is None:
                     acepv = numpy.nan
                 
-                print >> sys.stderr, "%10s %15s %5d %5d %7.2f %7.2f %10.2e %7.2f %7.2f %10.2e" % (icd9, eth, num_families, i+1, aeh2, aeer, aepv, aceh2, aceer, acepv)
-    
+                print >> sys.stderr, "%10s %15s %5d %5d %7.2f %7.2f %10.2e %7.2f %7.2f %10.2e" % (icd9, eth, num_families, len(ae_h2r_results), aeh2, aeer, aepv, aceh2, aceer, acepv)
+
+    if num_families > len(families_with_case[icd9]):
+        print >> sys.stderr, "Number of families to be sampled (%d) is larger than what is available (%d)." % (num_families, len(families_with_case[icd9]))
+    else:
+        if verbose:
+            print >> sys.stderr, "%10s %15s %5s %5s %7s %7s %10s %7s %7s %10s" % ('Trait', 'Ethnicity', 'NFam', 'Samp', 'AE h2', 'err', 'pval', 'ACE h2', 'err', 'pval')
+        
+        pool = mp.Pool(nprocs)
+        
+        for i in range(num_attempts):
+            h2_path = os.path.join(solar_dir, icd9, 'h2_%d_%s' % (num_families, random_string(5)))
+            solar_args = (h2_path,
+                            families_with_case,
+                            icd9,
+                            trait_type,
+                            num_families,
+                            iid2ped,
+                            all_traits,
+                            eth,
+                            fam2empi,
+                            fam2eth,
+                            all_fam2count,
+                            all_fam2proband,
+                            use_proband,
+                            house,
+                            verbose)
+            if nprocs == 1:
+                log_solar_results(solar(*solar_args))
+            else:
+                pool.apply_async(solar, args = solar_args, callback = log_solar_results)
+        
+        pool.close()
+        pool.join()
+                
     return ae_h2r_results, ace_h2r_results
 
-def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, all_traits, eth, min_ascertained, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house, verbose):
+def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house, verbose):
     """
     Setup the data for solar and run solar for the given condition.
     
@@ -527,7 +537,6 @@ def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, 
     build_solar_directories(h2_path,
                            iid2ped,
                            all_traits[icd9],
-                           min_ascertained,
                            fam2empi,
                            all_fam2count[icd9],
                            all_fam2proband[icd9],
@@ -536,7 +545,9 @@ def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, 
                            verbose=False, # this one is kindof annoying if it is on
                            family_ids_only=chosen_families)
     
-    return single_solar_run(h2_path, house, verbose)
+    results = single_solar_run(h2_path, house, verbose)
+    shutil.rmtree(h2_path)
+    return results
 
 def parse_polygenic_out(polygenic_out_fn, verbose):
     

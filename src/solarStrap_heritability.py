@@ -47,18 +47,16 @@ from h2o_utility import TRAIT_TYPE_QUANTITATIVE
 
 common_data_path = ''
 
-def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix=''):
+def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix='', nprocs=1):
     
     if trait_type == 'D':
         trait_type_code = TRAIT_TYPE_BINARY
         use_proband = True
-        min_ascertained = 1
         _DT_ = True
         _QT_ = False
     elif trait_type == 'Q':
         trait_type_code = TRAIT_TYPE_QUANTITATIVE
         use_proband = False
-        min_ascertained = 2
         _DT_ = False
         _QT_ = True
     else:
@@ -99,20 +97,6 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
     
     print >> sys.stderr, "Loaded data for %d phenotypes." % len(all_traits.keys())
     
-    if _DT_:
-        print >> sys.stderr, "%10s %13s %13s" % ("Trait", "N Cases", "N Controls")
-        for trait in all_traits.keys():
-            ncases = sum(all_traits[trait].values())
-            nctrls = len(all_traits[trait])-ncases
-            print >> sys.stderr, "%10s %13d %13d" % (trait, ncases, nctrls)
-            if nctrls == 0:
-                print >> sys.stderr, "Error: There are no controls available for the dichotomous trait."
-    if _QT_:
-        print >> sys.stderr, "%10s %13s" % ("Trait", "N Samples")
-        for trait in all_traits.keys():
-            ncases = len(all_traits[trait])
-            print >> sys.stderr, "%10s %13d" % (trait, ncases)
-    
     if not diag_slice is None:
         if len(diag_slice) == 1:
             start = diag_slice[0]
@@ -135,11 +119,37 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
         for icd9 in diags_to_process:
             all_fam2count[icd9][fam_id] = sum([1 for e in members if e in all_traits[icd9]])
             all_fam2case[icd9][fam_id] = sum([all_traits[icd9][e] for e in members if e in all_traits[icd9]])
-            if _DT_ and all_fam2case[icd9][fam_id] >= 1:
+            if _DT_ and all_fam2case[icd9][fam_id] >= 1 and all_fam2count[icd9][fam_id] >= 2:
+                # dichotomous traits must have at least one individual with the disease
+                # and at least two ascertained (case or control) per family
                 families_with_case[icd9].add(fam_id)
-            if _QT_ and all_fam2count[icd9][fam_id] >= min_ascertained:
+            if _QT_ and all_fam2count[icd9][fam_id] >= 2:
+                # quantitative traits must have least two individuals with measured traits
                 families_with_case[icd9].add(fam_id)
     
+    if _DT_:
+        print >> sys.stderr, "%10s %10s %10s %10s %10s %10s" % ('Trait', 'N Ascert', 'N Cases', 'N Families', 'Avg Ctl/Fam', 'Avg Aff/Fam', )
+        summary_stats = list()
+        for icd9 in diags_to_process:
+            apf = numpy.mean([all_fam2case[icd9][famid] for famid in families_with_case[icd9]])
+            cpf = numpy.mean([(all_fam2count[icd9][famid]-all_fam2case[icd9][famid]) for famid in families_with_case[icd9]])
+        
+            summary_stats.append( [apf, icd9, len(all_traits[icd9]), sum(all_traits[icd9].values()), len(families_with_case[icd9]), cpf] )
+        
+        summary_stats = sorted(summary_stats)
+        for row in summary_stats:
+            args = row[1:]
+            args.append(row[0])
+            print >> sys.stderr, "%10s %10d %10d %10d %10.4f %10.4f" % tuple(args)
+    
+    if _QT_:
+        print >> sys.stderr, "%10s %13s %10s" % ("Trait", "N Samples", "Avg Aff/Fam")
+        for trait in all_traits.keys():
+            apf = numpy.mean([all_fam2count[icd9][famid] for famid in families_with_case[icd9]])
+            ncases = len(all_traits[trait])
+            print >> sys.stderr, "%10s %13d %10.4f" % (trait, ncases, apf)
+
+
     all_fam2proband = defaultdict(dict)
     if _DT_:
         print >> sys.stderr, "Assigning a proband for each family for each trait..."
@@ -165,11 +175,6 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
         ethnicities = ['ALL'] + eth2fam.keys()
     
     print >> sys.stderr, "Evaluating %d ethnicities: %s" % (len(ethnicities), ', '.join(ethnicities))
-    
-    if _DT_:
-        min_ascertained = 1
-    if _QT_:
-        min_ascertained = 2
     
     num_attempts = 200
     
@@ -216,13 +221,13 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                                                               iid2ped,
                                                               all_traits,
                                                               eth,
-                                                              min_ascertained,
                                                               fam2empi,
                                                               fam2eth,
                                                               all_fam2count,
                                                               all_fam2proband,
                                                               use_proband,
                                                               house,
+                                                              nprocs,
                                                               verbose)
                 for h2o, err, pval in ae_h2r_results:
                     runs_writer.writerow([icd9, eth, num_families, 'AE', h2o, err, pval])
@@ -273,4 +278,5 @@ if __name__ == '__main__':
         ethnicities = None if not 'eth' in args else args['eth'],
         verbose = False if not 'verbose' in args else args['verbose'].lower() == 'yes',
         house = False if not 'ace' in args else args['ace'].lower() == 'yes',
-        prefix = args['name'])
+        prefix = args['name'],
+        nprocs = 1 if not 'nprocs' in args else int(args['nprocs']))
