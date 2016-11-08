@@ -552,10 +552,10 @@ def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, 
                            family_ids_only=chosen_families)
     
     if not buildonly:
-        print >> sys.stderr, h2_path
+        #print >> sys.stderr, h2_path
         results = single_solar_run(h2_path, house, verbose)
         results['APF'] = apf
-        #shutil.rmtree(h2_path)
+        shutil.rmtree(h2_path)
     else:
         results = {'AE':{'h2r':None, 'err':None, 'pvalue':None}, 'ACE':{'h2r':None, 'err':None, 'pvalue':None}, 'APF': apf}
     
