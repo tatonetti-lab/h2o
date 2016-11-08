@@ -9,7 +9,7 @@ Compute heritability for one or more traits.
 
 USAGE EXAMPLE
 -------------
-python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [nfam=500] [sd=path/to/working_directory] [ace=yes] [verbose=yes]
+python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [nfam=500] [sd=path/to/working_directory] [ace=yes] [verbose=yes] [samples=200] [buildonly=yes]
 
 """
 __version__ = 0.9
@@ -47,7 +47,7 @@ from h2o_utility import TRAIT_TYPE_QUANTITATIVE
 
 common_data_path = ''
 
-def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix='', nprocs=1):
+def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False):
     
     if trait_type == 'D':
         trait_type_code = TRAIT_TYPE_BINARY
@@ -176,8 +176,6 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
     
     print >> sys.stderr, "Evaluating %d ethnicities: %s" % (len(ethnicities), ', '.join(ethnicities))
     
-    num_attempts = 200
-    
     results_file = open(os.path.join(solar_dir, '%s_solar_strap_results.csv' % prefix), 'w')
     results_writer = csv.writer(results_file)
     results_writer.writerow(['trait', 'ethnicity', 'num_families', 'model', 'h2o', 'h2o_lower', 'h2o_upper', 'solarerr', 'solarpval', 'num_attempts', 'num_converged', 'num_significant', 'posa'])
@@ -228,7 +226,8 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                                                               use_proband,
                                                               house,
                                                               nprocs,
-                                                              verbose)
+                                                              verbose,
+                                                              buildonly)
                 for h2o, err, pval in ae_h2r_results:
                     runs_writer.writerow([icd9, eth, num_families, 'AE', h2o, err, pval])
                 
@@ -279,4 +278,6 @@ if __name__ == '__main__':
         verbose = False if not 'verbose' in args else args['verbose'].lower() == 'yes',
         house = False if not 'ace' in args else args['ace'].lower() == 'yes',
         prefix = args['name'],
-        nprocs = 1 if not 'nprocs' in args else int(args['nprocs']))
+        nprocs = 1 if not 'nprocs' in args else int(args['nprocs']),
+        num_attempts = 200 if not 'samples' in args else int(args['samples']),
+        buildonly = False if not 'buildonly' in args else args['buildonly'].lower() == 'yes')

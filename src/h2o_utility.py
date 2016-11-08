@@ -452,7 +452,7 @@ def estimate_h2o(h2r_results, ci = 95.):
     
     return h2o, h2olo, h2ohi, solarerr, solarpval, num_converged, num_significant, posa 
 
-def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts, solar_dir, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house=False, nprocs=1, verbose=False):
+def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts, solar_dir, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house=False, nprocs=1, verbose=False, buildonly=False):
     """
     Run the bootstrapping algorithm to estimate the observational heritability for both
     the AE and ACE (if house=True) models of heritability. Results of this funciton can be parsed with 
@@ -464,7 +464,7 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
     def log_solar_results(single_results):
         ae_h2r_results.append((single_results['AE']['h2r'], single_results['AE']['err'], single_results['AE']['pvalue']))
         ace_h2r_results.append((single_results['ACE']['h2r'], single_results['ACE']['err'], single_results['ACE']['pvalue']))
-        if verbose:
+        if verbose and not buildonly:
                 aeh2 = single_results['AE']['h2r']
                 aeer = single_results['AE']['err']
                 aepv = single_results['AE']['pvalue']
@@ -485,13 +485,13 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
                 if acepv is None:
                     acepv = numpy.nan
                 
-                print >> sys.stderr, "%10s %15s %5d %5d %7.2f %7.2f %10.2e %7.2f %7.2f %10.2e" % (icd9, eth, num_families, len(ae_h2r_results), aeh2, aeer, aepv, aceh2, aceer, acepv)
+                print >> sys.stderr, "%10s %15s %5d %5d %7.2f %7.2f %10.2e %7.2f %7.2f %10.2e %10.4f" % (icd9, eth, num_families, len(ae_h2r_results), aeh2, aeer, aepv, aceh2, aceer, acepv, single_results['APF'])
 
     if num_families > len(families_with_case[icd9]):
         print >> sys.stderr, "Number of families to be sampled (%d) is larger than what is available (%d)." % (num_families, len(families_with_case[icd9]))
     else:
-        if verbose:
-            print >> sys.stderr, "%10s %15s %5s %5s %7s %7s %10s %7s %7s %10s" % ('Trait', 'Ethnicity', 'NFam', 'Samp', 'AE h2', 'err', 'pval', 'ACE h2', 'err', 'pval')
+        if verbose and not buildonly:
+            print >> sys.stderr, "%10s %15s %5s %5s %7s %7s %10s %7s %7s %10s %10s" % ('Trait', 'Ethnicity', 'NFam', 'Samp', 'AE h2', 'err', 'pval', 'ACE h2', 'err', 'pval', 'Sample AFP')
         
         pool = mp.Pool(nprocs)
         
@@ -511,7 +511,8 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
                             all_fam2proband,
                             use_proband,
                             house,
-                            verbose)
+                            verbose,
+                            buildonly)
             if nprocs == 1:
                 log_solar_results(solar(*solar_args))
             else:
@@ -522,7 +523,7 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
                 
     return ae_h2r_results, ace_h2r_results
 
-def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house, verbose):
+def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house, verbose, buildonly):
     """
     Setup the data for solar and run solar for the given condition.
     
@@ -534,6 +535,11 @@ def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, 
     
     available_families = [fid for fid in families_with_case[icd9] if eth == 'ALL' or fam2eth == eth]
     chosen_families = random.sample(available_families, num_families)
+    if trait_type == TRAIT_TYPE_BINARY:
+        apf = numpy.mean([numpy.sum([all_traits[icd9].get(iid, 0) for iid in fam2empi[famid]]) for famid in chosen_families])
+    elif trait_type == TRAIT_TYPE_BINARY:
+        apf = numpy.mean([all_fam2count[icd9][famid] for famid in chosen_families])
+    
     build_solar_directories(h2_path,
                            iid2ped,
                            all_traits[icd9],
@@ -545,8 +551,14 @@ def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, 
                            verbose=False, # this one is kindof annoying if it is on
                            family_ids_only=chosen_families)
     
-    results = single_solar_run(h2_path, house, verbose)
-    shutil.rmtree(h2_path)
+    if not buildonly:
+        print >> sys.stderr, h2_path
+        results = single_solar_run(h2_path, house, verbose)
+        results['APF'] = apf
+        shutil.rmtree(h2_path)
+    else:
+        results = {'AE':{'h2r':None, 'err':None, 'pvalue':None}, 'ACE':{'h2r':None, 'err':None, 'pvalue':None}, 'APF': apf}
+    
     return results
 
 def parse_polygenic_out(polygenic_out_fn, verbose):
