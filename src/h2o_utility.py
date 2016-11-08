@@ -537,7 +537,7 @@ def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, 
     chosen_families = random.sample(available_families, num_families)
     if trait_type == TRAIT_TYPE_BINARY:
         apf = numpy.mean([numpy.sum([all_traits[icd9].get(iid, 0) for iid in fam2empi[famid]]) for famid in chosen_families])
-    elif trait_type == TRAIT_TYPE_BINARY:
+    elif trait_type == TRAIT_TYPE_QUANTITATIVE:
         apf = numpy.mean([all_fam2count[icd9][famid] for famid in chosen_families])
     
     build_solar_directories(h2_path,
@@ -555,7 +555,7 @@ def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, 
         print >> sys.stderr, h2_path
         results = single_solar_run(h2_path, house, verbose)
         results['APF'] = apf
-        shutil.rmtree(h2_path)
+        #shutil.rmtree(h2_path)
     else:
         results = {'AE':{'h2r':None, 'err':None, 'pvalue':None}, 'ACE':{'h2r':None, 'err':None, 'pvalue':None}, 'APF': apf}
     
