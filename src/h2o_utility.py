@@ -416,16 +416,12 @@ def extract_convered_estimates(h2r_results, edge_eps, denoise_eps):
         converged.append( (h2, h2err, pval) )
     return converged
 
-def estimate_h2o(h2r_results, ci = 95.):
+# NOTE: These hyperparameters are set by "Heritability - SOLARStrap - 84phenos - Hyperparamters"
+def estimate_h2o(h2r_results, ci = 95., pcutoff=0.05, edge_eps=1e-9, denoise_eps=0.05, error_reporting=True):
     
     num_converged = 0
     num_significant = 0
     sig_h2s = list()
-    
-    # NOTE: These hyperparameters are set by "Heritability - SOLARStrap - 84phenos - Hyperparamters"
-    pcutoff = 0.05
-    edge_eps = 1e-9
-    denoise_eps = 0.05
     
     converged = extract_convered_estimates(h2r_results, edge_eps, denoise_eps)
     num_converged = len(converged)
@@ -436,10 +432,11 @@ def estimate_h2o(h2r_results, ci = 95.):
             sig_h2s.append((h2, h2err, pval))
     
     if num_significant == 0:
-        print >> sys.stderr, "ERROR: There are no significant and converged estimates available."
+        if error_reporting:
+            print >> sys.stderr, "ERROR: There are no significant and converged estimates available."
         return False
     
-    if num_significant < 30:
+    if num_significant < 30 and error_reporting:
         print >> sys.stderr, "WARNING: There are fewer than 30 (%d) significant and converged estimates." % num_significant
     
     h2o, solarerr, solarpval = sorted(sig_h2s)[len(sig_h2s)/2]
