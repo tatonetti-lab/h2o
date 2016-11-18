@@ -9,7 +9,7 @@ Compute heritability for one or more traits.
 
 USAGE EXAMPLE
 -------------
-python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [nfam=500] [sd=path/to/working_directory] [ace=yes] [verbose=yes] [samples=200] [buildonly=yes]
+python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [nfam=0.15] [sd=path/to/working_directory] [ace=no] [verbose=no] [samples=200] [buildonly=no] [proband=yes]
 
 """
 __version__ = 0.9
@@ -47,20 +47,23 @@ from h2o_utility import TRAIT_TYPE_QUANTITATIVE
 
 common_data_path = ''
 
-def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False):
+def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False, use_proband=True):
     
     if trait_type == 'D':
         trait_type_code = TRAIT_TYPE_BINARY
-        use_proband = True
         _DT_ = True
         _QT_ = False
     elif trait_type == 'Q':
         trait_type_code = TRAIT_TYPE_QUANTITATIVE
+        if use_proband:
+            print >> sys.stderr, "Setting use_proband=False for quantitative trait."
         use_proband = False
         _DT_ = False
         _QT_ = True
     else:
         raise Exception("Unknown trait type provided (%s). Must be either D or Q." % trait_type)
+    
+    print >> sys.stderr, "Use proband? %s " % ('yes' if use_proband else 'no')
     
     if not os.path.exists(solar_dir):
         raise Exception("A directory must exist at: %s" % solar_dir)
@@ -119,13 +122,31 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
         for icd9 in diags_to_process:
             all_fam2count[icd9][fam_id] = sum([1 for e in members if e in all_traits[icd9]])
             all_fam2case[icd9][fam_id] = sum([all_traits[icd9][e] for e in members if e in all_traits[icd9]])
-            if _DT_ and all_fam2case[icd9][fam_id] >= 1 and all_fam2count[icd9][fam_id] >= 2:
-                # dichotomous traits must have at least one individual with the disease
-                # and at least two ascertained (case or control) per family
-                families_with_case[icd9].add(fam_id)
-            if _QT_ and all_fam2count[icd9][fam_id] >= 2:
+            # There are two scenarios for deciding which families to sample from:
+            # 1) The preferred one for observational heritability is that only families
+            # with at least one individual with the trait (disease) are included. We do
+            # this because we have more confidence in the ascertainment of cases than
+            # controls. We then control for having only families with traits  by setting
+            # a "proband" in each family. Solar then will use the proband to adjust the
+            # heritability estimate.
+            #
+            # 2) The second scenario is that we include any family that has at least two
+            # members with ascertained traits (either case or control). You want to use this
+            # if you are very confidence in your ascertainment of controls. This is usually
+            # not the case if your data are coming from observational sources. In this
+            # case we leave out the proband assigment.
+            
+            if not use_proband and all_fam2count[icd9][fam_id] >= 2:
                 # quantitative traits must have least two individuals with measured traits
+                # or dichotomous traits with high confidence controls
                 families_with_case[icd9].add(fam_id)
+            elif _DT_ and all_fam2case[icd9][fam_id] >= 1 and all_fam2count[icd9][fam_id] >= 2:
+                # dichotomous traits with noisy/uncertain controls
+                families_with_case[icd9].add(fam_id)
+    
+    # for testing purposes only, remove
+    print >> sys.stderr, "Setting use_proband=False for testing."
+    use_proband = False
     
     if _DT_:
         print >> sys.stderr, "%10s %10s %10s %10s %10s %10s" % ('Trait', 'N Ascert', 'N Cases', 'N Families', 'Avg Ctl/Fam', 'Avg Aff/Fam', )
@@ -280,4 +301,5 @@ if __name__ == '__main__':
         prefix = args['name'],
         nprocs = 1 if not 'nprocs' in args else int(args['nprocs']),
         num_attempts = 200 if not 'samples' in args else int(args['samples']),
-        buildonly = False if not 'buildonly' in args else args['buildonly'].lower() == 'yes')
+        buildonly = False if not 'buildonly' in args else args['buildonly'].lower() == 'yes',
+        use_proband = True if not 'proband' in args else args['proband'].lower() == 'yes')
