@@ -97,7 +97,7 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
     
     available_diagnoses = sorted(all_traits.keys())
     diags_to_process = available_diagnoses
-    
+    diag2idx = dict([(diag, idx) for idx, diag in enumerate(diags_to_process)])
     print >> sys.stderr, "Loaded data for %d phenotypes." % len(all_traits.keys())
     
     if not diag_slice is None:
@@ -144,24 +144,23 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                 # dichotomous traits with noisy/uncertain controls
                 families_with_case[icd9].add(fam_id)
     
-    # for testing purposes only, remove
-    print >> sys.stderr, "Setting use_proband=False for testing."
-    use_proband = False
-    
     if _DT_:
-        print >> sys.stderr, "%10s %10s %10s %10s %10s %10s" % ('Trait', 'N Ascert', 'N Cases', 'N Families', 'Avg Ctl/Fam', 'Avg Aff/Fam', )
+        fmt_string_h = "%10s %" + str(max(map(len, diags_to_process))+1) + "s %10s %10s %10s %10s %10s"
+        fmt_string_r = "%10s %" + str(max(map(len, diags_to_process))+1) + "s %10d %10d %10d %10.4f %10.4f"
+        
+        print >> sys.stderr, fmt_string_h % ('Trait Idx', 'Trait', 'N Ascert', 'N Cases', 'N Families', 'Avg Ctl/Fam', 'Avg Aff/Fam', )
         summary_stats = list()
-        for icd9 in diags_to_process:
+        for idx, icd9 in enumerate(diags_to_process):
             apf = numpy.mean([all_fam2case[icd9][famid] for famid in families_with_case[icd9]])
             cpf = numpy.mean([(all_fam2count[icd9][famid]-all_fam2case[icd9][famid]) for famid in families_with_case[icd9]])
         
-            summary_stats.append( [apf, icd9, len(all_traits[icd9]), sum(all_traits[icd9].values()), len(families_with_case[icd9]), cpf] )
+            summary_stats.append( [apf, diag2idx[icd9], icd9, len(all_traits[icd9]), sum(all_traits[icd9].values()), len(families_with_case[icd9]), cpf] )
         
         summary_stats = sorted(summary_stats)
         for row in summary_stats:
             args = row[1:]
             args.append(row[0])
-            print >> sys.stderr, "%10s %10d %10d %10d %10.4f %10.4f" % tuple(args)
+            print >> sys.stderr, fmt_string_r % tuple(args)
     
     if _QT_:
         print >> sys.stderr, "%10s %13s %10s" % ("Trait", "N Samples", "Avg Aff/Fam")
