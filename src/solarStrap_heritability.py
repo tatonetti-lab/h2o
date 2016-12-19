@@ -211,7 +211,7 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
         for icd9 in diags_to_process:
 
             if type(num_families) == float and num_families < 1:
-                num_families = max(500, int(num_families*len(families_with_case[icd9])))
+                num_families = max(100, int(num_families*len(families_with_case[icd9])))
             else:
                 num_familes = int(num_families)
 
