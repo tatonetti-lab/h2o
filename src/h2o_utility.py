@@ -292,6 +292,9 @@ def load_generic_pedigree(generic_ped_path, empi2sex, empi2age):
     
     return iid2ped
 
+class SolarException(Exception):
+    pass
+
 def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, fam2proband, use_proband, trait_type, verbose = True, family_ids_only = None):
     """
     Build the directories with files needed to run SOLAR a single time.
@@ -326,7 +329,7 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, f
     
     # solar can't handle more than 32K individuals in a pedigree file, if you are using solar you should turn this back on
     if len(trait_ped) > 32000:
-        raise Exception("Too many individuals in a single pedigree. SOLAR max is 32,000.")
+        raise SolarException("Too many individuals in a single pedigree. SOLAR max is 32,000.")
     
     num_runs = 1
     
