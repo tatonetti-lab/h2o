@@ -22,6 +22,7 @@ import time
 import gzip
 import numpy
 import string
+import shutil
 import random
 import shutil
 from collections import defaultdict
@@ -112,11 +113,18 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
 
         diags_to_process = available_diagnoses[start:stop]
 
+    print >> sys.stderr, "Loading pedigree file..."
+    generic_ped_path = os.path.join(common_data_path, pedigree_file)
+    iid2ped = load_generic_pedigree(generic_ped_path, empi2sex, empi2age)
+
+    print >> sys.stderr, "Assigning ethnicities..."
+    eth2fam, fam2eth = assign_family_ethnicities(fam2empi, empi2demog)
+
     print >> sys.stderr, "Loading ascertainment counts..."
 
     all_fam2count = defaultdict(dict)
     all_fam2case = defaultdict(dict)
-    families_with_case = defaultdict(set)
+    families_with_case = defaultdict(lambda: defaultdict(set))
 
     for fam_id, members in fam2empi.items():
         for icd9 in diags_to_process:
@@ -126,23 +134,25 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
             # 1) The preferred one for observational heritability is that only families
             # with at least one individual with the trait (disease) are included. We do
             # this because we have more confidence in the ascertainment of cases than
-            # controls. We then control for having only families with traits  by setting
+            # controls. We then control for having only families with traits by setting
             # a "proband" in each family. Solar then will use the proband to adjust the
             # heritability estimate.
             #
             # 2) The second scenario is that we include any family that has at least two
             # members with ascertained traits (either case or control). You want to use this
-            # if you are very confidence in your ascertainment of controls. This is usually
+            # if you are very confident in your ascertainment of controls. This is usually
             # not the case if your data are coming from observational sources. In this
             # case we leave out the proband assigment.
 
             if not use_proband and all_fam2count[icd9][fam_id] >= 2:
                 # quantitative traits must have least two individuals with measured traits
                 # or dichotomous traits with high confidence controls
-                families_with_case[icd9].add(fam_id)
+                families_with_case['ALL'][icd9].add(fam_id)
+                families_with_case[fam2eth[fam_id]][icd9].add(fam_id)
             elif _DT_ and all_fam2case[icd9][fam_id] >= 1 and all_fam2count[icd9][fam_id] >= 2:
                 # dichotomous traits with noisy/uncertain controls
-                families_with_case[icd9].add(fam_id)
+                families_with_case['ALL'][icd9].add(fam_id)
+                families_with_case[fam2eth[fam_id]][icd9].add(fam_id)
 
     if _DT_:
         fmt_string_h = "%10s %" + str(max(map(len, diags_to_process))+1) + "s %10s %10s %10s %10s %10s"
@@ -151,10 +161,10 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
         print >> sys.stderr, fmt_string_h % ('Trait Idx', 'Trait', 'N Ascert', 'N Cases', 'N Families', 'Avg Ctl/Fam', 'Avg Aff/Fam', )
         summary_stats = list()
         for idx, icd9 in enumerate(diags_to_process):
-            apf = numpy.mean([all_fam2case[icd9][famid] for famid in families_with_case[icd9]])
-            cpf = numpy.mean([(all_fam2count[icd9][famid]-all_fam2case[icd9][famid]) for famid in families_with_case[icd9]])
+            apf = numpy.mean([all_fam2case[icd9][famid] for famid in families_with_case['ALL'][icd9]])
+            cpf = numpy.mean([(all_fam2count[icd9][famid]-all_fam2case[icd9][famid]) for famid in families_with_case['ALL'][icd9]])
 
-            summary_stats.append( [apf, diag2idx[icd9], icd9, len(all_traits[icd9]), sum(all_traits[icd9].values()), len(families_with_case[icd9]), cpf] )
+            summary_stats.append( [apf, diag2idx[icd9], icd9, len(all_traits[icd9]), sum(all_traits[icd9].values()), len(families_with_case['ALL'][icd9]), cpf] )
 
         summary_stats = sorted(summary_stats)
         for row in summary_stats:
@@ -165,7 +175,7 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
     if _QT_:
         print >> sys.stderr, "%10s %13s %10s" % ("Trait", "N Samples", "Avg Aff/Fam")
         for trait in all_traits.keys():
-            apf = numpy.mean([all_fam2count[icd9][famid] for famid in families_with_case[icd9]])
+            apf = numpy.mean([all_fam2count[icd9][famid] for famid in families_with_case['ALL'][icd9]])
             ncases = len(all_traits[trait])
             print >> sys.stderr, "%10s %13d %10.4f" % (trait, ncases, apf)
 
@@ -185,14 +195,10 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                 if all_fam2case[icd9][famid] > 0 and not famid in all_fam2proband[icd9]:
                     raise Exception("Family: %s did not have a proband!" % famid)
 
-    generic_ped_path = os.path.join(common_data_path, pedigree_file)
-    iid2ped = load_generic_pedigree(generic_ped_path, empi2sex, empi2age)
-    eth2fam, fam2eth = assign_family_ethnicities(fam2empi, empi2demog)
-
     if ethnicities is None:
         ethnicities = ['ALL']
     elif ethnicities == 'each':
-        ethnicities = ['ALL'] + eth2fam.keys()
+        ethnicities = eth2fam.keys() + ['ALL']
 
     print >> sys.stderr, "Evaluating %d ethnicities: %s" % (len(ethnicities), ', '.join(ethnicities))
 
@@ -209,31 +215,30 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
 
     for num_families in num_families_range:
         for icd9 in diags_to_process:
-
-            if type(num_families) == float and num_families < 1:
-                num_families = int(num_families*len(families_with_case[icd9]))
-            else:
-                num_familes = int(num_families)
-
-            print >> sys.stderr, "Running solarStrap analysis for %s, num_fam = %d" % (icd9, num_families)
-            print >> sys.stderr, " AE: yes, ACE: %s" % ('yes' if house else 'no')
-
-            icd9_path = os.path.join(solar_dir, icd9)
-            if not os.path.exists(icd9_path):
-                os.mkdir(icd9_path)
-
-            h2_path = os.path.join(solar_dir, icd9, 'h2')
-
-            print >> sys.stderr, "Number of families with case: %d" % (len(families_with_case[icd9]))
-
-            if num_families > len(families_with_case[icd9]):
-                print >> sys.stderr, "Not enough families available, skipping."
-                continue
-
             for eth in ethnicities:
 
+                if type(num_families) == float and num_families < 1:
+                    num_families = int(num_families*len(families_with_case[eth][icd9]))
+                else:
+                    num_families = int(num_families)
+
+                print >> sys.stderr, "Running solarStrap analysis for %s, num_fam = %d, on ethnicity = %s" % (icd9, num_families, eth)
+                print >> sys.stderr, " AE: yes, ACE: %s" % ('yes' if house else 'no')
+
+                icd9_path = os.path.join(solar_dir, icd9)
+                if not os.path.exists(icd9_path):
+                    os.mkdir(icd9_path)
+
+                h2_path = os.path.join(solar_dir, icd9, 'h2')
+
+                print >> sys.stderr, "Number of families with case: %d" % (len(families_with_case[eth][icd9]))
+
+                if num_families > len(families_with_case[eth][icd9]):
+                    print >> sys.stderr, "Not enough families available, skipping."
+                    continue
+
                 ae_h2r_results, ace_h2r_results = solar_strap(num_families,
-                                                              families_with_case,
+                                                              families_with_case[eth],
                                                               icd9,
                                                               trait_type_code,
                                                               num_attempts,
@@ -269,6 +274,9 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                         print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'ACE', h2o, solarerr, solarpval, num_attempts, num_converged, num_significant, posa)
                         results_writer.writerow([icd9, eth, num_families, 'ACE', h2o, h2olo, h2ohi, solarerr, solarpval, num_attempts, num_converged, num_significant, posa])
 
+        # clean up
+        shutil.rmtree(icd9_path)
+
     results_file.close()
     runs_file.close()
 
@@ -287,6 +295,12 @@ if __name__ == '__main__':
     print >> sys.stderr, "Summary results will be saved in %(sd)s/%(name)s_solar_strap_results.csv" % args
     print >> sys.stderr, "Results from each bootstrap will be saved at %(sd)s/%(name)s_solar_strap_allruns.csv" % args
     print >> sys.stderr, ""
+
+    valid_args = ('demog', 'fam', 'ped', 'trait', 'sd', 'type', 'nfam', 'slice',
+        'eth', 'verbose', 'ace', 'name', 'nprocs','samples', 'buildonly', 'proband')
+    for argname in args.keys():
+        if not argname in valid_args:
+            raise Exception("Provided argument: `%s` is not a valid argument name." % argname)
 
     main(demographic_file = args['demog'],
         family_file = args['fam'],
