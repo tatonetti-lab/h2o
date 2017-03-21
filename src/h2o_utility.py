@@ -443,7 +443,7 @@ def estimate_h2o(h2r_results, ci = 95., show_warnings=True, show_errors=True):
         return False
     
     if num_significant < 30:
-        if shwo_warnings:
+        if show_warnings:
             print >> sys.stderr, "WARNING: There are fewer than 30 (%d) significant and converged estimates." % num_significant
     
     h2o, solarerr, solarpval = sorted(sig_h2s)[len(sig_h2s)/2]
