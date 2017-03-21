@@ -198,7 +198,7 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
     if ethnicities is None:
         ethnicities = ['ALL']
     elif ethnicities == 'each':
-        ethnicities = eth2fam.keys() + ['ALL']
+        ethnicities = ['ALL'] + eth2fam.keys()
 
     print >> sys.stderr, "Evaluating %d ethnicities: %s" % (len(ethnicities), ', '.join(ethnicities))
 
@@ -213,14 +213,18 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
     if num_families_range is None:
         num_families_range = [0.15,]
 
-    for num_families in num_families_range:
+    for num_families_arg in num_families_range:
         for icd9 in diags_to_process:
+
+            for eth in families_with_case.keys():
+                print >> sys.stderr, eth, len(families_with_case[eth][icd9])
+
             for eth in ethnicities:
 
-                if type(num_families) == float and num_families < 1:
-                    num_families = int(num_families*len(families_with_case[eth][icd9]))
+                if type(num_families_arg) == float and num_families_arg < 1:
+                    num_families = int(num_families_arg*len(families_with_case[eth][icd9]))
                 else:
-                    num_families = int(num_families)
+                    num_families = int(num_families_arg)
 
                 print >> sys.stderr, "Running solarStrap analysis for %s, num_fam = %d, on ethnicity = %s" % (icd9, num_families, eth)
                 print >> sys.stderr, " AE: yes, ACE: %s" % ('yes' if house else 'no')
@@ -232,6 +236,8 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                 h2_path = os.path.join(solar_dir, icd9, 'h2')
 
                 print >> sys.stderr, "Number of families with case: %d" % (len(families_with_case[eth][icd9]))
+
+                continue
 
                 if num_families > len(families_with_case[eth][icd9]):
                     print >> sys.stderr, "Not enough families available, skipping."
