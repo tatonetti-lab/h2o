@@ -237,8 +237,6 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
 
                 print >> sys.stderr, "Number of families with case: %d" % (len(families_with_case[eth][icd9]))
 
-                continue
-
                 if num_families > len(families_with_case[eth][icd9]):
                     print >> sys.stderr, "Not enough families available, skipping."
                     continue
