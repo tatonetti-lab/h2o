@@ -129,7 +129,7 @@ Summary results will be saved in ./working/F6ZF3_solar_strap_results.csv
 Results from each bootstrap will be saved at ./working/F6ZF3_solar_strap_allruns.csv
 ```
 
-If you run solar in verbose mode you will see a log of the h2 estimats from SOLAR if SOLARStrap is running successfully.
+If you run solar in verbose mode you will see a log of the h2 estimates from SOLAR if SOLARStrap is running successfully.
 
 ```
 Number of families with case: 3686
