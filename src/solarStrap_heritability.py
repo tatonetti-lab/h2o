@@ -50,7 +50,7 @@ from h2o_utility import TRAIT_TYPE_QUANTITATIVE
 
 common_data_path = ''
 
-def main(demographic_file, family_file, pedigree_file, trait_path, relationships_file, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False, use_proband=True):
+def main(demographic_file, family_file, pedigree_file, trait_path, relationships_file, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False, use_proband=True, gcta=False):
 
     if trait_type == 'D':
         trait_type_code = TRAIT_TYPE_BINARY
@@ -247,7 +247,8 @@ def main(demographic_file, family_file, pedigree_file, trait_path, relationships
                     print >> sys.stderr, "Not enough families available, skipping."
                     continue
                 
-                ae_h2r_results, ace_h2r_results = gcta_strap(num_families,
+                if gcta:
+                    ae_h2r_results, ace_h2r_results = gcta_strap(num_families,
                                                               families_with_case[eth],
                                                               icd9,
                                                               trait_type_code,
@@ -265,25 +266,25 @@ def main(demographic_file, family_file, pedigree_file, trait_path, relationships
                                                               nprocs,
                                                               verbose,
                                                               buildonly)
-                
-                # ae_h2r_results, ace_h2r_results = solar_strap(num_families,
-                #                                               families_with_case[eth],
-                #                                               icd9,
-                #                                               trait_type_code,
-                #                                               num_attempts,
-                #                                               solar_dir,
-                #                                               iid2ped,
-                #                                               all_traits,
-                #                                               eth,
-                #                                               fam2empi,
-                #                                               fam2eth,
-                #                                               all_fam2count,
-                #                                               all_fam2proband,
-                #                                               use_proband,
-                #                                               house,
-                #                                               nprocs,
-                #                                               verbose,
-                #                                               buildonly)
+                else:
+                    ae_h2r_results, ace_h2r_results = solar_strap(num_families,
+                                                              families_with_case[eth],
+                                                              icd9,
+                                                              trait_type_code,
+                                                              num_attempts,
+                                                              solar_dir,
+                                                              iid2ped,
+                                                              all_traits,
+                                                              eth,
+                                                              fam2empi,
+                                                              fam2eth,
+                                                              all_fam2count,
+                                                              all_fam2proband,
+                                                              use_proband,
+                                                              house,
+                                                              nprocs,
+                                                              verbose,
+                                                              buildonly)
                 for h2o, err, pval in ae_h2r_results:
                     runs_writer.writerow([icd9, eth, num_families, 'AE', h2o, err, pval])
 
@@ -326,7 +327,7 @@ if __name__ == '__main__':
     print >> sys.stderr, ""
 
     valid_args = ('demog', 'fam', 'ped', 'rel', 'trait', 'sd', 'type', 'nfam', 'slice',
-        'eth', 'verbose', 'ace', 'name', 'nprocs','samples', 'buildonly', 'proband')
+        'eth', 'verbose', 'ace', 'name', 'nprocs','samples', 'buildonly', 'proband', 'gcta')
     for argname in args.keys():
         if not argname in valid_args:
             raise Exception("Provided argument: `%s` is not a valid argument name." % argname)
@@ -347,4 +348,5 @@ if __name__ == '__main__':
         nprocs = 1 if not 'nprocs' in args else int(args['nprocs']),
         num_attempts = 200 if not 'samples' in args else int(args['samples']),
         buildonly = False if not 'buildonly' in args else args['buildonly'].lower() == 'yes',
-        use_proband = True if not 'proband' in args else args['proband'].lower() == 'yes')
+        use_proband = True if not 'proband' in args else args['proband'].lower() == 'yes',
+        gcta = False if not 'gcta' in args else args['gcta'].lower() == 'yes')
