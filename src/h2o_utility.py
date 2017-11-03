@@ -451,7 +451,7 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
     for i in tqdm(range(len(patients))):
         gctapid1, pid1 = patients[i]
         gcta_grm_id.append([i+1, gctapid1])
-        for j, pid2 in enumerate(patients):
+        for j, (gctapid2, pid2) in enumerate(patients):
             if i == j:
                 gcta_grm.append( [i+1, j+1, 1000, 1.0])
             elif i > j:
