@@ -418,19 +418,9 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
     if verbose:
         print >> sys.stderr, "Building the phenotype and covariate files for GCTA..."
     
-    gcta_working_path = os.path.join(h2_path, 'working')
-    
-    if not os.path.exists(gcta_working_path):
-        os.mkdir(gcta_working_path)
-    
-    phenfh = open(os.path.join(gcta_working_path, 'trait.phen'), 'w')
-    phenwriter = csv.writer(phenfh, delimiter=' ', quoting=csv.QUOTE_NONE)
-    
-    covarfh = open(os.path.join(gcta_working_path, 'trait.covar'), 'w')
-    covarwriter = csv.writer(covarfh, delimiter=' ', quoting=csv.QUOTE_NONE)
-    
-    qcovarfh = open(os.path.join(gcta_working_path, 'trait.qcovar'), 'w')
-    qcovarwriter = csv.writer(qcovarfh, delimiter=' ', quoting=csv.QUOTE_NONE)
+    gcta_phen = list()
+    gcta_covar = list()
+    gcta_qcovar = list()
     
     for pid in tqdm(patients):
         famid, iid, sex, age, trait = patient_data[pid]
@@ -438,38 +428,57 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
         if trait is None:
             trait = -9
         
-        phenwriter.writerow([pat2index[iid], pat2patid[iid], trait])
-        covarwriter.writerow([pat2index[iid], pat2patid[iid], sex, empi2demog[iid]['race']])
-        qcovarwriter.writerow([pat2index[iid], pat2patid[iid], age])
-    
-    phenfh.close()
-    covarfh.close()
-    qcovarfh.close()
+        gcta_phen.append([pat2index[iid], pat2patid[iid], trait])
+        gcta_covar.append([pat2index[iid], pat2patid[iid], sex, empi2demog[iid]['race']])
+        gcta_qcovar.append([pat2index[iid], pat2patid[iid], age])
     
     if verbose:
         print >> sys.stderr, "Building the GRM file for gcta..."
     
-    grmfh = gzip.open(os.path.join(gcta_working_path, 'trait.grm.gz'), 'w')
-    grmwriter = csv.writer(grmfh, delimiter=' ', quoting=csv.QUOTE_NONE)
-    
-    
-    grmidfh = open(os.path.join(gcta_working_path, 'trait.grm.id'), 'w')
-    grmidwriter = csv.writer(grmidfh, delimiter=' ', quoting=csv.QUOTE_NONE)
+    gcta_grm = list()
+    gcta_grm_id = list()
     
     for i in tqdm(range(len(patients))):
         pid1 = patients[i]
-        grmidwriter.writerow([i+1, pat2patid[pid1]])
+        gcta_grm_id.append([i+1, pat2patid[pid1]])
         for j, pid2 in enumerate(patients):
             if i == j:
-                grmwriter.writerow( [i+1, j+1, 1000, 1.0])
+                gcta_grm.append( [i+1, j+1, 1000, 1.0])
             elif i > j:
-                grmwriter.writerow( [i+1, j+1, 1000, relationships[pid1].get(pid2, 0.0)] )
+                gcta_grm.append( [i+1, j+1, 1000, relationships[pid1].get(pid2, 0.0)] )
     
-    grmfh.close()
-    grmidfh.close()
+    gcta_working_path = os.path.join(h2_path, 'working')
+    
+    if not os.path.exists(gcta_working_path):
+        os.mkdir(gcta_working_path)
     
     if verbose:
         print >> sys.stderr, "All files loaded. Writing to disk at %s..." % gcta_working_path
+    
+    fh = open(os.path.join(gcta_working_path, 'trait.phen'), 'w')
+    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
+    writer.writerows(gcta_phen)
+    fh.close()
+    
+    fh = open(os.path.join(gcta_working_path, 'trait.covar'), 'w')
+    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
+    writer.writerows(gcta_covar)
+    fh.close()
+    
+    fh = open(os.path.join(gcta_working_path, 'trait.qcovar'), 'w')
+    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
+    writer.writerows(gcta_qcovar)
+    fh.close()
+    
+    fh = gzip.open(os.path.join(gcta_working_path, 'trait.grm.gz'), 'w')
+    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
+    writer.writerows(gcta_grm)
+    fh.close()
+    
+    fh = open(os.path.join(gcta_working_path, 'trait.grm.id'), 'w')
+    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
+    writer.writerows(gcta_grm_id)
+    fh.close()
     
     if verbose:
         print >> sys.stderr, "Finished building working directories."
