@@ -33,6 +33,7 @@ from h2o_utility import assign_family_ethnicities
 from h2o_utility import load_demographics
 from h2o_utility import load_family_ids
 from h2o_utility import load_relationships
+from h2o_utility import load_relationships_by_pairs
 from h2o_utility import load_generic_pedigree
 
 from h2o_utility import build_solar_directories
@@ -40,6 +41,7 @@ from h2o_utility import single_solar_run
 from h2o_utility import solar
 from h2o_utility import random_string
 from h2o_utility import solar_strap
+from h2o_utility import gcta_strap
 from h2o_utility import prevelance
 from h2o_utility import estimate_h2o
 
@@ -48,7 +50,7 @@ from h2o_utility import TRAIT_TYPE_QUANTITATIVE
 
 common_data_path = ''
 
-def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False, use_proband=True):
+def main(demographic_file, family_file, pedigree_file, trait_path, relationships_file, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False, use_proband=True):
 
     if trait_type == 'D':
         trait_type_code = TRAIT_TYPE_BINARY
@@ -112,10 +114,12 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
             raise Exception("ERROR: Slice provided in unexpected format: %s" % diag_slice)
 
         diags_to_process = available_diagnoses[start:stop]
-
-    print >> sys.stderr, "Loading pedigree file..."
-    generic_ped_path = os.path.join(common_data_path, pedigree_file)
-    iid2ped = load_generic_pedigree(generic_ped_path, empi2sex, empi2age)
+        
+    iid2ped = None
+    if not pedigree_file is None:
+        print >> sys.stderr, "Loading pedigree file..."
+        generic_ped_path = os.path.join(common_data_path, pedigree_file)
+        iid2ped = load_generic_pedigree(generic_ped_path, empi2sex, empi2age)
 
     print >> sys.stderr, "Assigning ethnicities..."
     eth2fam, fam2eth = assign_family_ethnicities(fam2empi, empi2demog)
@@ -212,36 +216,38 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
 
     if num_families_range is None:
         num_families_range = [0.15,]
-
+    
+    relationships = load_relationships_by_pairs(relationships_file)
+    
     for num_families_arg in num_families_range:
         for icd9 in diags_to_process:
-
+            
             for eth in families_with_case.keys():
                 print >> sys.stderr, eth, len(families_with_case[eth][icd9])
-
+                
             for eth in ethnicities:
-
+                
                 if type(num_families_arg) == float and num_families_arg < 1:
                     num_families = int(num_families_arg*len(families_with_case[eth][icd9]))
                 else:
                     num_families = int(num_families_arg)
-
+                    
                 print >> sys.stderr, "Running solarStrap analysis for %s, num_fam = %d, on ethnicity = %s" % (icd9, num_families, eth)
                 print >> sys.stderr, " AE: yes, ACE: %s" % ('yes' if house else 'no')
-
+                
                 icd9_path = os.path.join(solar_dir, icd9)
                 if not os.path.exists(icd9_path):
                     os.mkdir(icd9_path)
-
+                    
                 h2_path = os.path.join(solar_dir, icd9, 'h2')
-
+                
                 print >> sys.stderr, "Number of families with case: %d" % (len(families_with_case[eth][icd9]))
-
+                
                 if num_families > len(families_with_case[eth][icd9]):
                     print >> sys.stderr, "Not enough families available, skipping."
                     continue
-
-                ae_h2r_results, ace_h2r_results = solar_strap(num_families,
+                
+                ae_h2r_results, ace_h2r_results = gcta_strap(num_families,
                                                               families_with_case[eth],
                                                               icd9,
                                                               trait_type_code,
@@ -250,15 +256,34 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                                                               iid2ped,
                                                               all_traits,
                                                               eth,
+                                                              empi2demog,
                                                               fam2empi,
                                                               fam2eth,
                                                               all_fam2count,
-                                                              all_fam2proband,
-                                                              use_proband,
+                                                              relationships,
                                                               house,
                                                               nprocs,
                                                               verbose,
                                                               buildonly)
+                
+                # ae_h2r_results, ace_h2r_results = solar_strap(num_families,
+                #                                               families_with_case[eth],
+                #                                               icd9,
+                #                                               trait_type_code,
+                #                                               num_attempts,
+                #                                               solar_dir,
+                #                                               iid2ped,
+                #                                               all_traits,
+                #                                               eth,
+                #                                               fam2empi,
+                #                                               fam2eth,
+                #                                               all_fam2count,
+                #                                               all_fam2proband,
+                #                                               use_proband,
+                #                                               house,
+                #                                               nprocs,
+                #                                               verbose,
+                #                                               buildonly)
                 for h2o, err, pval in ae_h2r_results:
                     runs_writer.writerow([icd9, eth, num_families, 'AE', h2o, err, pval])
 
@@ -300,18 +325,19 @@ if __name__ == '__main__':
     print >> sys.stderr, "Results from each bootstrap will be saved at %(sd)s/%(name)s_solar_strap_allruns.csv" % args
     print >> sys.stderr, ""
 
-    valid_args = ('demog', 'fam', 'ped', 'trait', 'sd', 'type', 'nfam', 'slice',
+    valid_args = ('demog', 'fam', 'ped', 'rel', 'trait', 'sd', 'type', 'nfam', 'slice',
         'eth', 'verbose', 'ace', 'name', 'nprocs','samples', 'buildonly', 'proband')
     for argname in args.keys():
         if not argname in valid_args:
             raise Exception("Provided argument: `%s` is not a valid argument name." % argname)
-
+    
     main(demographic_file = args['demog'],
         family_file = args['fam'],
-        pedigree_file = args['ped'],
+        pedigree_file = args.get('ped', None),
         trait_path = args['trait'],
         solar_dir = args['sd'],
         trait_type = args['type'],
+        relationships_file = args.get('rel', None),
         num_families_range = None if not 'nfam' in args else map(float, args['nfam'].split(',')),
         diag_slice = None if not 'slice' in args else map(int, args['slice'].split('-')),
         ethnicities = None if not 'eth' in args else args['eth'],

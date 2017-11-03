@@ -66,6 +66,56 @@ proc runanalysishouse {} {
 }
 """
 
+def blood_proportion(rel):
+    return float(blood_fraction(rel))/100.
+
+def blood_fraction(r):
+    if r == 'Aunt/Uncle':
+        return 25
+    elif r == 'Child':
+        return 50
+    elif r == 'Cousin':
+        return 12.5
+    elif r == 'First cousin once removed':
+        return 6.25
+    elif r == 'Grandaunt/Granduncle':
+        return 12.5
+    elif r == 'Grandchild':
+        return 25
+    elif r == 'Grandnephew/Grandniece':
+        return 12.5
+    elif r == 'Grandparent':
+        return 25
+    elif r == 'Great-grandaunt/Great-granduncle':
+        return 6.25
+    elif r == 'Great-grandchild':
+        return 12.5
+    elif r == 'Great-grandnephew/Great-grandniece':
+        return 6.25
+    elif r == 'Great-grandparent':
+        return 12.5
+    elif r == 'Great-great-grandchild':
+        return 6.25
+    elif r == 'Great-great-grandparent':
+        return 6.25
+    elif r == 'Nephew/Niece':
+        return 25
+    elif r == 'Parent':
+        return 50
+    elif r == 'Sibling':
+        return 50
+    elif r == 'Spouse':
+        return 0
+    elif r == 'Child/Nephew/Niece':
+        return 25
+    elif r == 'Parent/Aunt/Uncle':
+        return 25
+    elif r == 'Sibling/Cousin':
+        return 12.5
+    else:
+        #rint >> sys.stderr, "Encountered relationshp not found: %s" % r
+        return 0
+
 def random_string(N):
     return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(N))
 
@@ -189,6 +239,20 @@ def load_family_ids(family_file_path):
 
     return empi2fam, fam2empi
 
+def load_relationships_by_pairs(relationships_file):
+    # load the relationships
+    fh = gzip.open(os.path.join(relationships_file))
+    rel_data = csv.reader(fh, delimiter='\t')
+    rel_data.next()
+    
+    relationships = defaultdict(dict)
+    
+    for empi1, rel, empi2, provided in rel_data:
+        rel = rel.strip()
+        relationships[empi1][empi2] = blood_proportion(rel)
+    
+    return relationships
+
 def load_relationships(relationship_file_path, print_breakdown=True):
     """
     Load the patient relationships from file.
@@ -297,6 +361,128 @@ def load_generic_pedigree(generic_ped_path, empi2sex, empi2age):
 
 class SolarException(Exception):
     pass
+
+def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count, relationships, trait_type, verbose = True, family_ids_only = None):
+    """
+    Build the directoies with the files need to run GCTA a single time.
+    
+    GCTA requires four files:
+    1. *.phen file of the phenotyes, columns are family ID, individual ID and phenotypes
+    2. *.covar file of the covariates, columns are family ID, individual ID and discrete covariates
+    3. *.qcovar file of the quantitative covariates, columns are family ID, individual ID and quantitative covariates
+    4. *.grm.gz file of the genetic relatedness between all pairs of indivdiuals, 
+                columns are indices of pairs of individuals (row numbers of the test.grm.id), number of non-missing SNPs and the estimate of genetic relatedness
+    
+    """
+    
+    if not os.path.exists(h2_path):
+        os.mkdir(h2_path)
+    
+    if verbose:
+        print >> sys.stderr, "Building files at path: %s" % h2_path
+    
+    if os.path.exists(os.path.join(h2_path, 'wd')):
+        raise Exception("Directory already exists at path: %s" % os.path.join(h2_path, 'wd'))
+    
+    if verbose:
+        print >> sys.stderr, "Building trait-specfic pedigree file...",
+    
+    trait_ped = list()
+    patients = set()
+    for famid in family_ids_only:
+        if fam2count[famid] < 2:
+            continue
+
+        for pid in fam2empi[famid]:
+            if trait_type == TRAIT_TYPE_BINARY:
+                trait_value = empi2trait.get(pid, None)
+                trait_value = int(trait_value) if not trait_value is None else trait_value
+            else:
+                trait_value = empi2trait.get(pid, None)
+            if trait_value is None:
+                continue
+            trait_ped.append( [famid, pid, empi2demog[pid]['sex'], empi2demog[pid]['age'], trait_value])
+            patients.add(pid)
+    
+    if verbose:
+        print >> sys.stderr, "ok."
+        print >> sys.stderr, "Found %d individuals that are members of families with at least 2 acertained individual(s)." % len(trait_ped)
+    
+    if verbose:
+        print >> sys.stderr, "Building the phenotype and covariate files for GCTA..."
+    
+    gcta_phen = list()
+    gcta_covar = list()
+    gcta_qcovar = list()
+    
+    for row in tqdm(trait_ped):
+        famid, iid, sex, age, trait = row
+        
+        #solar_ped.append( [famid, iid, fid, mid, sex] )
+        
+        if trait is None:
+            trait = 'NA'
+        
+        gcta_phen.append([famid, iid, trait])
+        gcta_covar.append([famid, iid, sex, empi2demog[iid]['race']])
+        gcta_qcovar.append([famid, iid, age])
+    
+    if verbose:
+        print >> sys.stderr, "Building the GRM file for covar..."
+    
+    gcta_grm = list()
+    gcta_grm_id = list()
+    
+    patients = sorted(patients)
+    
+    for i in tqdm(range(len(patients))):
+        pid1 = patients[i]
+        gcta_grm_id.append([i+1, pid1])
+        for j, pid2 in enumerate(patients):
+            if i == j:
+                gcta_grm.append( [i+1, j+1, 1000, 1.0])
+            elif i > j:
+                gcta_grm.append( [i+1, j+1, 1000, relationships[pid1].get(pid2, 0.0)] )
+    
+    gcta_working_path = os.path.join(h2_path, 'working')
+    
+    if not os.path.exists(gcta_working_path):
+        os.mkdir(gcta_working_path)
+    
+    if verbose:
+        print >> sys.stderr, "All files loaded. Writing to disk at %s..." % gcta_working_path
+    
+    fh = open(os.path.join(gcta_working_path, 'trait.phen'), 'w')
+    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+    writer.writerows(gcta_phen)
+    fh.close()
+    
+    fh = open(os.path.join(gcta_working_path, 'trait.covar'), 'w')
+    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+    writer.writerows(gcta_covar)
+    fh.close()
+    
+    fh = open(os.path.join(gcta_working_path, 'trait.qcovar'), 'w')
+    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+    writer.writerows(gcta_qcovar)
+    fh.close()
+    
+    fh = gzip.open(os.path.join(gcta_working_path, 'trait.grm.gz'), 'w')
+    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+    writer.writerows(gcta_grm)
+    fh.close()
+    
+    fh = open(os.path.join(gcta_working_path, 'trait.grm.id'), 'w')
+    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+    writer.writerows(gcta_grm_id)
+    fh.close()
+    
+    if verbose:
+        print >> sys.stderr, "Finished building working directories."
+    
+    sys.exit(101)
+    return
+    
 
 def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, fam2proband, use_proband, trait_type, verbose = True, family_ids_only = None):
     """
@@ -529,6 +715,68 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
         pool.join()
 
     return ae_h2r_results, ace_h2r_results
+
+def gcta_strap(num_families, families_with_case, icd9, trait_type, num_attempts, solar_dir, iid2ped, all_traits, eth, empi2demog, fam2empi, fam2eth, all_fam2count, relationships, house=False, nprocs=1, verbose=False, buildonly=False):
+    """
+    Run the bootstrapping algorithm to estimate the observational heritability for both
+    the AE and ACE (if house=True) models of heritability. Results of this funciton can be parsed with
+    estimate_h2o().
+    """
+    
+    h2_path = os.path.join(solar_dir, icd9, 'h2_%d_%s' % (num_families, random_string(5)))
+    
+    if num_families > len(families_with_case[icd9]):
+        print >> sys.stderr, "Number of families to be sampled (%d) is larger than what is available (%d)." % (num_families, len(families_with_case[icd9]))
+    else:
+        gcta_args = (h2_path,
+                        families_with_case,
+                        icd9,
+                        trait_type,
+                        num_families,
+                        all_traits,
+                        eth,
+                        empi2demog,
+                        fam2empi,
+                        fam2eth,
+                        all_fam2count,
+                        relationships,
+                        verbose,
+                        buildonly)
+        gcta(*gcta_args)
+    
+    ae_h2r_results = list()
+    ace_h2r_results = list()
+    
+    return ae_h2r_results, ace_h2r_results
+
+def gcta(h2_path, families_with_case, icd9, trait_type, num_families, all_traits, eth, empi2demog, fam2empi, fam2eth, all_fam2count, relationships, verbose, buildonly):
+    """
+    Setup the data for GCTA and run GCTA for the given condition.
+    """
+    
+    # if the h2_path exists, we remove it
+    if os.path.exists(h2_path):
+        shutil.rmtree(h2_path)
+    
+    available_families = [fid for fid in families_with_case[icd9] if eth == 'ALL' or fam2eth[fid] == eth]
+    chosen_families = random.sample(available_families, num_families)
+    if trait_type == TRAIT_TYPE_BINARY:
+        apf = numpy.mean([numpy.sum([all_traits[icd9].get(iid, 0) for iid in fam2empi[famid]]) for famid in chosen_families])
+    elif trait_type == TRAIT_TYPE_QUANTITATIVE:
+        apf = numpy.mean([all_fam2count[icd9][famid] for famid in chosen_families])
+    
+    build_gcta_directories(h2_path,
+                           empi2demog,
+                           all_traits[icd9],
+                           fam2empi,
+                           all_fam2count[icd9],
+                           relationships,
+                           trait_type,
+                           verbose=True, # this one is kindof annoying if it is on
+                           family_ids_only=chosen_families)
+
+    print >> sys.stderr, "BUILDONLY! We haven't implemented GCTA yet."
+    
 
 def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house, verbose, buildonly):
     """
