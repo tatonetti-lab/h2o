@@ -408,7 +408,7 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
     
     if verbose:
         print >> sys.stderr, "ok."
-        print >> sys.stderr, "Found %d individuals that are members of families with at least 2 acertained individual(s)." % len(trait_ped)
+        print >> sys.stderr, "Found %d individuals that are members of families with at least 2 acertained individual(s)." % len(patient_data)
     
     if verbose:
         print >> sys.stderr, "Building the phenotype and covariate files for GCTA..."
