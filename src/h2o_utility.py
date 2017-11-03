@@ -427,7 +427,7 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
         
         gcta_phen.append([famid, iid, trait])
         gcta_covar.append([famid, iid, sex, empi2demog[iid]['race']])
-        gcta_qcovar.append([famid, pat2gctapat[iid], age])
+        gcta_qcovar.append([famid, iid, age])
     
     if verbose:
         print >> sys.stderr, "Building the GRM file for covar..."
