@@ -466,27 +466,27 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
         print >> sys.stderr, "All files loaded. Writing to disk at %s..." % gcta_working_path
     
     fh = open(os.path.join(gcta_working_path, 'trait.phen'), 'w')
-    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
     writer.writerows(gcta_phen)
     fh.close()
     
     fh = open(os.path.join(gcta_working_path, 'trait.covar'), 'w')
-    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
     writer.writerows(gcta_covar)
     fh.close()
     
     fh = open(os.path.join(gcta_working_path, 'trait.qcovar'), 'w')
-    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
     writer.writerows(gcta_qcovar)
     fh.close()
     
     fh = gzip.open(os.path.join(gcta_working_path, 'trait.grm.gz'), 'w')
-    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
     writer.writerows(gcta_grm)
     fh.close()
     
     fh = open(os.path.join(gcta_working_path, 'trait.grm.id'), 'w')
-    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
     writer.writerows(gcta_grm_id)
     fh.close()
     
