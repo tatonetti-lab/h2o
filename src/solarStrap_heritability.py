@@ -258,6 +258,7 @@ def main(demographic_file, family_file, pedigree_file, trait_path, relationships
                                                               all_traits,
                                                               eth,
                                                               empi2demog,
+                                                              empi2fam,
                                                               fam2empi,
                                                               fam2eth,
                                                               all_fam2count,

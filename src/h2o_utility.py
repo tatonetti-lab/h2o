@@ -362,7 +362,7 @@ def load_generic_pedigree(generic_ped_path, empi2sex, empi2age):
 class SolarException(Exception):
     pass
 
-def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count, relationships, trait_type, verbose = True, family_ids_only = None):
+def build_gcta_directories(h2_path, empi2demog, empi2trait, empi2fam, fam2empi, fam2count, relationships, trait_type, verbose = True, family_ids_only = None):
     """
     Build the directoies with the files need to run GCTA a single time.
     
@@ -444,8 +444,10 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
         for j, pid2 in enumerate(patients):
             if i == j:
                 gcta_grm.append( [i+1, j+1, 1000, 1.0])
+            elif empi2fam[pid1] != empi2fam[pid2]:
+                gcta_grm.append( [i+1, j+1, 1000, 0.0])
             elif i > j:
-                gcta_grm.append( [i+1, j+1, 1000, relationships[pid1].get(pid2, 0.0)] )
+                gcta_grm.append( [i+1, j+1, 1000, relationships[pid1][pid2]] )
     
     gcta_working_path = os.path.join(h2_path, 'working')
     
@@ -719,7 +721,7 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
 
     return ae_h2r_results, ace_h2r_results
 
-def gcta_strap(num_families, families_with_case, icd9, trait_type, num_attempts, solar_dir, iid2ped, all_traits, eth, empi2demog, fam2empi, fam2eth, all_fam2count, relationships, house=False, nprocs=1, verbose=False, buildonly=False):
+def gcta_strap(num_families, families_with_case, icd9, trait_type, num_attempts, solar_dir, iid2ped, all_traits, eth, empi2demog, empi2fam, fam2empi, fam2eth, all_fam2count, relationships, house=False, nprocs=1, verbose=False, buildonly=False):
     """
     Run the bootstrapping algorithm to estimate the observational heritability for both
     the AE and ACE (if house=True) models of heritability. Results of this funciton can be parsed with
@@ -739,6 +741,7 @@ def gcta_strap(num_families, families_with_case, icd9, trait_type, num_attempts,
                         all_traits,
                         eth,
                         empi2demog,
+                        empi2fam,
                         fam2empi,
                         fam2eth,
                         all_fam2count,
@@ -752,7 +755,7 @@ def gcta_strap(num_families, families_with_case, icd9, trait_type, num_attempts,
     
     return ae_h2r_results, ace_h2r_results
 
-def gcta(h2_path, families_with_case, icd9, trait_type, num_families, all_traits, eth, empi2demog, fam2empi, fam2eth, all_fam2count, relationships, verbose, buildonly):
+def gcta(h2_path, families_with_case, icd9, trait_type, num_families, all_traits, eth, empi2demog, empi2fam, fam2empi, fam2eth, all_fam2count, relationships, verbose, buildonly):
     """
     Setup the data for GCTA and run GCTA for the given condition.
     """
@@ -771,6 +774,7 @@ def gcta(h2_path, families_with_case, icd9, trait_type, num_families, all_traits
     build_gcta_directories(h2_path,
                            empi2demog,
                            all_traits[icd9],
+                           empi2fam,
                            fam2empi,
                            all_fam2count[icd9],
                            relationships,
