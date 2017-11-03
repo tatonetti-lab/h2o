@@ -387,7 +387,7 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
     if verbose:
         print >> sys.stderr, "Building trait-specfic pedigree file...",
     
-    trait_ped = list()
+    patient_data = dict()
     patients = set()
     for famid in family_ids_only:
         if fam2count[famid] < 2:
@@ -401,8 +401,10 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
                 trait_value = empi2trait.get(pid, None)
             if trait_value is None:
                 continue
-            trait_ped.append( [famid, pid, empi2demog[pid]['sex'], empi2demog[pid]['age'], trait_value])
+            patient_data[pid] = [famid, pid, empi2demog[pid]['sex'], empi2demog[pid]['age'], trait_value]
             patients.add(pid)
+    
+    patients = sorted(patients)
     
     if verbose:
         print >> sys.stderr, "ok."
@@ -415,8 +417,8 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
     gcta_covar = list()
     gcta_qcovar = list()
     
-    for row in tqdm(trait_ped):
-        famid, iid, sex, age, trait = row
+    for pid in tqdm(patients):
+        famid, iid, sex, age, trait = patient_data[pid]
         
         #solar_ped.append( [famid, iid, fid, mid, sex] )
         
@@ -432,8 +434,6 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
     
     gcta_grm = list()
     gcta_grm_id = list()
-    
-    patients = sorted(patients)
     
     for i in tqdm(range(len(patients))):
         pid1 = patients[i]
