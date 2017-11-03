@@ -436,7 +436,7 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
         #solar_ped.append( [famid, iid, fid, mid, sex] )
         
         if trait is None:
-            trait = 'NA'
+            trait = -9
         
         gcta_phen.append([fam2gctafam[famid], pat2gctapat[iid], trait])
         gcta_covar.append([fam2gctafam[famid], pat2gctapat[iid], sex, empi2demog[iid]['race']])
