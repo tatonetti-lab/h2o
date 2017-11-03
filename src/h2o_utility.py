@@ -427,9 +427,9 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
         if trait is None:
             trait = -9
         
-        gcta_phen.append([pat2famid[famid], pat2patid[iid], trait])
-        gcta_covar.append([pat2famid[famid], pat2patid[iid], sex, empi2demog[iid]['race']])
-        gcta_qcovar.append([pat2famid[famid], pat2patid[iid], age])
+        gcta_phen.append([pat2famid[iid], pat2patid[iid], trait])
+        gcta_covar.append([pat2famid[iid], pat2patid[iid], sex, empi2demog[iid]['race']])
+        gcta_qcovar.append([pat2famid[iid], pat2patid[iid], age])
     
     if verbose:
         print >> sys.stderr, "Building the GRM file for covar..."
