@@ -407,6 +407,8 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
             patients.add( pid )
     
     patients = sorted(patients)
+    pat2patid = dict([(pid,i+10) for i, pid in enumerate(patients)])
+    pat2famid = dict([(pid,i+100) for i, pid in enumerate(patients)])
     
     if verbose:
         print >> sys.stderr, "ok."
@@ -425,9 +427,9 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
         if trait is None:
             trait = -9
         
-        gcta_phen.append([famid, iid, trait])
-        gcta_covar.append([famid, iid, sex, empi2demog[iid]['race']])
-        gcta_qcovar.append([famid, iid, age])
+        gcta_phen.append([pat2famid[famid], pat2patid[iid], trait])
+        gcta_covar.append([pat2famid[famid], pat2patid[iid], sex, empi2demog[iid]['race']])
+        gcta_qcovar.append([pat2famid[famid], pat2patid[iid], age])
     
     if verbose:
         print >> sys.stderr, "Building the GRM file for covar..."
@@ -437,7 +439,7 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
     
     for i in tqdm(range(len(patients))):
         pid1 = patients[i]
-        gcta_grm_id.append([i+1, pid1])
+        gcta_grm_id.append([i+1, pat2patid[pid1]])
         for j, pid2 in enumerate(patients):
             if i == j:
                 gcta_grm.append( [i+1, j+1, 1000, 1.0])
