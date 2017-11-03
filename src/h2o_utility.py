@@ -389,20 +389,33 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
     
     patient_data = dict()
     patients = set()
+    
+    fam2gctafam = dict()
+    pat2gctapat = dict()
+    gctafam = 1
+    
     for famid in family_ids_only:
         if fam2count[famid] < 2:
             continue
-
+        
+        fam2gctafam[famid] = gctafam
+        gctafam += 1
+        
+        gctapat = 1
         for pid in fam2empi[famid]:
             if trait_type == TRAIT_TYPE_BINARY:
                 trait_value = empi2trait.get(pid, None)
                 trait_value = int(trait_value) if not trait_value is None else trait_value
             else:
                 trait_value = empi2trait.get(pid, None)
-            if trait_value is None:
-                continue
+            #if trait_value is None:
+            #    continue
+            
+            pat2gctapat[pid] = int('%d%d' % (fam2gctafam[famid], gctapat))
+            gctapat += 1
+            
             patient_data[pid] = [famid, pid, empi2demog[pid]['sex'], empi2demog[pid]['age'], trait_value]
-            patients.add(pid)
+            patients.add( (pat2gctapat[pid], pid) )
     
     patients = sorted(patients)
     
@@ -417,7 +430,7 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
     gcta_covar = list()
     gcta_qcovar = list()
     
-    for pid in tqdm(patients):
+    for gctapid, pid in tqdm(patients):
         famid, iid, sex, age, trait = patient_data[pid]
         
         #solar_ped.append( [famid, iid, fid, mid, sex] )
@@ -425,9 +438,9 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
         if trait is None:
             trait = 'NA'
         
-        gcta_phen.append([famid, iid, trait])
-        gcta_covar.append([famid, iid, sex, empi2demog[iid]['race']])
-        gcta_qcovar.append([famid, iid, age])
+        gcta_phen.append([fam2gctafam[famid], pat2gctapat[iid], trait])
+        gcta_covar.append([fam2gctafam[famid], pat2gctapat[iid], sex, empi2demog[iid]['race']])
+        gcta_qcovar.append([fam2gctafam[famid], pat2gctapat[iid], age])
     
     if verbose:
         print >> sys.stderr, "Building the GRM file for covar..."
@@ -436,8 +449,8 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, fam2empi, fam2count,
     gcta_grm_id = list()
     
     for i in tqdm(range(len(patients))):
-        pid1 = patients[i]
-        gcta_grm_id.append([i+1, pid1])
+        gctapid1, pid1 = patients[i]
+        gcta_grm_id.append([i+1, gctapid1])
         for j, pid2 in enumerate(patients):
             if i == j:
                 gcta_grm.append( [i+1, j+1, 1000, 1.0])
