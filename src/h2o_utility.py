@@ -401,7 +401,7 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, empi2fam, fam2empi, 
             else:
                 trait_value = empi2trait.get(pid, None)
             if trait_value is None:
-               continue0
+               continue
             
             patient_data[pid] = [famid, pid, empi2demog[pid]['sex'], empi2demog[pid]['age'], trait_value]
             patients.add( pid )
