@@ -401,7 +401,7 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, empi2fam, fam2empi, 
             else:
                 trait_value = empi2trait.get(pid, None)
             if trait_value is None:
-               continue
+               continue0
             
             patient_data[pid] = [famid, pid, empi2demog[pid]['sex'], empi2demog[pid]['age'], trait_value]
             patients.add( pid )
@@ -447,7 +447,10 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, empi2fam, fam2empi, 
             elif empi2fam[pid1] != empi2fam[pid2]:
                 gcta_grm.append( [i+1, j+1, 1000, 0.0])
             elif i > j:
-                gcta_grm.append( [i+1, j+1, 1000, relationships[pid1][pid2]] )
+                try:
+                    gcta_grm.append( [i+1, j+1, 1000, relationships[pid1][pid2]] )
+                except KeyError:
+                    raise Exception("KeyError in relationships: %s, %s" % (pid1, pid2))
     
     gcta_working_path = os.path.join(h2_path, 'working')
     
