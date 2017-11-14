@@ -14,6 +14,7 @@ import random
 
 from tqdm import tqdm
 from collections import defaultdict
+from scipy import sparse
 
 import multiprocessing as mp
 import time
@@ -362,7 +363,7 @@ def load_generic_pedigree(generic_ped_path, empi2sex, empi2age):
 class SolarException(Exception):
     pass
 
-def build_gcta_directories(h2_path, empi2demog, empi2trait, empi2fam, fam2empi, fam2count, relationships, trait_type, verbose = True, family_ids_only = None):
+def build_gcta_directories(h2_path, empi2demog, empi2trait, empi2fam, fam2empi, fam2count, relationships, grm, grmid, trait_type, verbose = True, family_ids_only = None):
     """
     Build the directoies with the files need to run GCTA a single time.
     
@@ -415,6 +416,7 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, empi2fam, fam2empi, 
         print >> sys.stderr, "ok."
         print >> sys.stderr, "Found %d individuals that are members of families with at least 2 acertained individual(s)." % len(patient_data)
     
+
     if verbose:
         print >> sys.stderr, "Building the phenotype and covariate files for GCTA..."
     
@@ -432,63 +434,90 @@ def build_gcta_directories(h2_path, empi2demog, empi2trait, empi2fam, fam2empi, 
         gcta_covar.append([pat2index[iid], pat2patid[iid], sex, empi2demog[iid]['race']])
         gcta_qcovar.append([pat2index[iid], pat2patid[iid], age])
     
-    if verbose:
-        print >> sys.stderr, "Building the GRM file for gcta..."
-    
-    gcta_grm = list()
-    gcta_grm_id = list()
-    
-    for i in tqdm(range(len(patients))):
-        pid1 = patients[i]
-        gcta_grm_id.append([i+1, pat2patid[pid1]])
-        for j, pid2 in enumerate(patients):
-            if i == j:
-                gcta_grm.append( [i+1, j+1, 1000, 1.0])
-            elif empi2fam[pid1] != empi2fam[pid2]:
-                gcta_grm.append( [i+1, j+1, 1000, 0.0])
-            elif i > j:
-                try:
-                    gcta_grm.append( [i+1, j+1, 1000, relationships[pid1][pid2]] )
-                except KeyError:
-                    raise Exception("KeyError in relationships: %s, %s" % (pid1, pid2))
-    
     gcta_working_path = os.path.join(h2_path, 'working')
-    
     if not os.path.exists(gcta_working_path):
         os.mkdir(gcta_working_path)
     
-    if verbose:
-        print >> sys.stderr, "All files loaded. Writing to disk at %s..." % gcta_working_path
+    if grm is None:
+        if verbose:
+            print >> sys.stderr, "Building the GRM file for gcta..."
     
+        gcta_grm = list()
+        gcta_grm_id = list()
+    
+        for i in tqdm(range(len(patients))):
+            pid1 = patients[i]
+            gcta_grm_id.append([i+1, pat2patid[pid1]])
+            for j, pid2 in enumerate(patients):
+                if i == j:
+                    gcta_grm.append( [i+1, j+1, 1000, 1.0])
+                elif i > j:
+                    if empi2fam[pid1] != empi2fam[pid2]:
+                        gcta_grm.append( [i+1, j+1, 1000, 0.0])
+                    else:
+                        gcta_grm.append( [i+1, j+1, 1000, relationships[pid1].get(pid2, 0.0)] )
+        
+        print >> sys.stderr, "Writing GRM to file at %s..." % gcta_working_path
+        fh = gzip.open(os.path.join(gcta_working_path, 'trait.grm.gz'), 'w')
+        writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+        writer.writerows(gcta_grm)
+        fh.close()
+
+        fh = open(os.path.join(gcta_working_path, 'trait.grm.id'), 'w')
+        writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+        writer.writerows(gcta_grm_id)
+        fh.close()
+    else:
+        if verbose:
+            print >> sys.stderr, "Filtering the GRM from precomputed data..."
+        
+        indices = [grmid[p] for p in patients]
+        grm_subset = grm[indices,:][:,indices]
+        #cx = sparse.tril(grm_subset).tocoo()
+        
+        print >> sys.stderr, "Writing GRM to file at %s..." % gcta_working_path
+        fh = gzip.open(os.path.join(gcta_working_path, 'trait.grm.gz'), 'w')
+        writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+        gcta_grm = list()
+        for j in tqdm(range(len(patients))):
+            for i in range(j, len(patients)):
+                gcta_grm.append((i+1, j+1, 1000, grm_subset[i,j] + numpy.abs(numpy.random.normal(0.0001, 0.0002))))
+        writer.writerows(gcta_grm)
+        
+        #for i, j, v in zip(cx.row, cx.col, cx.data):
+        #    writer.writerow([i+1, j+1, 1000, v])
+        fh.close()
+        
+        fh = open(os.path.join(gcta_working_path, 'trait.grm.id'), 'w')
+        writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
+        for i, pid in enumerate(patients):
+            writer.writerow([i+1, pat2patid[pid]])
+        fh.close()
+
     fh = open(os.path.join(gcta_working_path, 'trait.phen'), 'w')
-    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
+    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
     writer.writerows(gcta_phen)
     fh.close()
     
     fh = open(os.path.join(gcta_working_path, 'trait.covar'), 'w')
-    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
+    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
     writer.writerows(gcta_covar)
     fh.close()
     
     fh = open(os.path.join(gcta_working_path, 'trait.qcovar'), 'w')
-    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
+    writer = csv.writer(fh, delimiter='\t', quoting=csv.QUOTE_NONE)
     writer.writerows(gcta_qcovar)
-    fh.close()
-    
-    fh = gzip.open(os.path.join(gcta_working_path, 'trait.grm.gz'), 'w')
-    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
-    writer.writerows(gcta_grm)
-    fh.close()
-    
-    fh = open(os.path.join(gcta_working_path, 'trait.grm.id'), 'w')
-    writer = csv.writer(fh, delimiter=' ', quoting=csv.QUOTE_NONE)
-    writer.writerows(gcta_grm_id)
     fh.close()
     
     if verbose:
         print >> sys.stderr, "Finished building working directories."
     
-    sys.exit(101)
+    print >> sys.stderr, "Writing out bash script to run GCTA..."
+    
+    fh = open(os.path.join(gcat_working_path, 'run_gcta.sh'), 'w')
+    fh.write('gcta64 --reml --grm-gz trait --pheno trait.phen --out traitout --qcovar trait.qcovar --covar trait.covar')
+    fh.close()
+    
     return
     
 
@@ -724,7 +753,43 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
 
     return ae_h2r_results, ace_h2r_results
 
-def gcta_strap(num_families, families_with_case, icd9, trait_type, num_attempts, solar_dir, iid2ped, all_traits, eth, empi2demog, empi2fam, fam2empi, fam2eth, all_fam2count, relationships, house=False, nprocs=1, verbose=False, buildonly=False):
+def load_grm(grm_file, grmid_file, verbose = True):
+    """
+    Load the precomputed grm and grmid files if available.
+    """
+    
+    if grm_file is None or grmid_file is None:
+        return None, None
+    
+    if verbose:
+        print >> sys.stderr, "Loading precomputed GRM from file..."
+
+    fh = gzip.open(grm_file)
+    reader = csv.reader(fh, delimiter='\t')
+    rows = list()
+    cols = list()
+    values = list()
+    for i, j, value in tqdm(reader):
+        rows.append(int(i))
+        cols.append(int(j))
+        values.append(float(value))
+        if i != j:
+            rows.append(int(j))
+            cols.append(int(i))
+            values.append(float(value))
+    fh.close()    
+    grm = sparse.csr_matrix( (values, (rows, cols)) )
+    
+    fh = open(grmid_file)
+    reader = csv.reader(fh, delimiter='\t')
+    grmid = dict()
+    for rowid, iid in reader:
+        grmid[iid] = int(rowid)
+    fh.close()
+    
+    return grm, grmid
+
+def gcta_strap(num_families, families_with_case, icd9, trait_type, num_attempts, solar_dir, iid2ped, all_traits, eth, empi2demog, empi2fam, fam2empi, fam2eth, all_fam2count, relationships, grm, grmid, house=False, nprocs=1, verbose=False, buildonly=False):
     """
     Run the bootstrapping algorithm to estimate the observational heritability for both
     the AE and ACE (if house=True) models of heritability. Results of this funciton can be parsed with
@@ -749,6 +814,8 @@ def gcta_strap(num_families, families_with_case, icd9, trait_type, num_attempts,
                         fam2eth,
                         all_fam2count,
                         relationships,
+                        grm,
+                        grmid,
                         verbose,
                         buildonly)
         gcta(*gcta_args)
@@ -758,7 +825,7 @@ def gcta_strap(num_families, families_with_case, icd9, trait_type, num_attempts,
     
     return ae_h2r_results, ace_h2r_results
 
-def gcta(h2_path, families_with_case, icd9, trait_type, num_families, all_traits, eth, empi2demog, empi2fam, fam2empi, fam2eth, all_fam2count, relationships, verbose, buildonly):
+def gcta(h2_path, families_with_case, icd9, trait_type, num_families, all_traits, eth, empi2demog, empi2fam, fam2empi, fam2eth, all_fam2count, relationships, grm, grmid, verbose, buildonly):
     """
     Setup the data for GCTA and run GCTA for the given condition.
     """
@@ -781,11 +848,21 @@ def gcta(h2_path, families_with_case, icd9, trait_type, num_families, all_traits
                            fam2empi,
                            all_fam2count[icd9],
                            relationships,
+                           grm,
+                           grmid,
                            trait_type,
                            verbose=True, # this one is kindof annoying if it is on
                            family_ids_only=chosen_families)
 
-    print >> sys.stderr, "BUILDONLY! We haven't implemented GCTA yet."
+    if not buildonly:
+        #print >> sys.stderr, h2_path
+        results = single_gcta_run(h2_path, verbose)
+        results['APF'] = apf
+        shutil.rmtree(h2_path)
+    else:
+        results = {'AE':{'h2r':None, 'err':None, 'pvalue':None}, 'ACE':{'h2r':None, 'err':None, 'pvalue':None}, 'APF': apf}
+    
+    return results
     
 
 def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house, verbose, buildonly):

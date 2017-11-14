@@ -9,7 +9,7 @@ Compute heritability for one or more traits.
 
 USAGE EXAMPLE
 -------------
-python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [nfam=0.15] [sd=path/to/working_directory] [ace=no] [verbose=no] [samples=200] [buildonly=no] [proband=yes]
+python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [grm=generic_grm_file.txt.gz grmid=generic_grm_file.id.txt] [nfam=0.15] [sd=path/to/working_directory] [ace=no] [verbose=no] [samples=200] [buildonly=no] [proband=yes]
 
 """
 __version__ = 0.9
@@ -35,7 +35,7 @@ from h2o_utility import load_family_ids
 from h2o_utility import load_relationships
 from h2o_utility import load_relationships_by_pairs
 from h2o_utility import load_generic_pedigree
-
+from h2o_utility import load_grm
 from h2o_utility import build_solar_directories
 from h2o_utility import single_solar_run
 from h2o_utility import solar
@@ -50,7 +50,7 @@ from h2o_utility import TRAIT_TYPE_QUANTITATIVE
 
 common_data_path = ''
 
-def main(demographic_file, family_file, pedigree_file, trait_path, relationships_file, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False, use_proband=True, gcta=False):
+def main(demographic_file, family_file, pedigree_file, trait_path, relationships_file, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False, use_proband=True, gcta=False, grm_file=None, grmid_file=None):
 
     if trait_type == 'D':
         trait_type_code = TRAIT_TYPE_BINARY
@@ -78,6 +78,9 @@ def main(demographic_file, family_file, pedigree_file, trait_path, relationships
     # load demographic data (sex, birth_decade, race, ethnicity, age)
     demog_file_path = os.path.join(common_data_path, demographic_file)
     empi2demog = load_demographics(demog_file_path)
+    
+    # load grm if available
+    grm, grmid = load_grm(grm_file, grmid_file)
 
     # set up some convenience dictionaries
     empi2sex = dict()
@@ -263,6 +266,8 @@ def main(demographic_file, family_file, pedigree_file, trait_path, relationships
                                                               fam2eth,
                                                               all_fam2count,
                                                               relationships,
+                                                              grm,
+                                                              grmid,
                                                               house,
                                                               nprocs,
                                                               verbose,
@@ -328,7 +333,7 @@ if __name__ == '__main__':
     print >> sys.stderr, ""
 
     valid_args = ('demog', 'fam', 'ped', 'rel', 'trait', 'sd', 'type', 'nfam', 'slice',
-        'eth', 'verbose', 'ace', 'name', 'nprocs','samples', 'buildonly', 'proband', 'gcta')
+        'eth', 'verbose', 'ace', 'name', 'nprocs','samples', 'buildonly', 'proband', 'gcta', 'grm', 'grmid')
     for argname in args.keys():
         if not argname in valid_args:
             raise Exception("Provided argument: `%s` is not a valid argument name." % argname)
@@ -350,4 +355,6 @@ if __name__ == '__main__':
         num_attempts = 200 if not 'samples' in args else int(args['samples']),
         buildonly = False if not 'buildonly' in args else args['buildonly'].lower() == 'yes',
         use_proband = True if not 'proband' in args else args['proband'].lower() == 'yes',
-        gcta = False if not 'gcta' in args else args['gcta'].lower() == 'yes')
+        gcta = False if not 'gcta' in args else args['gcta'].lower() == 'yes',
+        grm_file = args.get('grm', None),
+        grmid_file = args.get('grmid', None))
