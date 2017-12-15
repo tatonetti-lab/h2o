@@ -66,6 +66,24 @@ proc runanalysishouse {} {
 }
 """
 
+tcl_analysis_string_q_bivar = """
+proc runanalysis {} {
+    model new
+    trait pheno pheno2
+    covariates sex age
+    tdist
+    polygenic -testrhop
+}
+proc runanalysishouse {} {
+    model new
+    trait pheno pheno2
+    covariates sex age
+    house
+    tdist
+    polygenic -testrhop
+}
+"""
+
 def random_string(N):
     return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(N))
 
@@ -298,7 +316,7 @@ def load_generic_pedigree(generic_ped_path, empi2sex, empi2age):
 class SolarException(Exception):
     pass
 
-def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, fam2proband, use_proband, trait_type, verbose = True, family_ids_only = None):
+def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, fam2proband, use_proband, trait_type, bivariate = False, verbose = True, family_ids_only = None):
     """
     Build the directories with files needed to run SOLAR a single time.
     """
@@ -323,9 +341,11 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, f
 
         for pid in fam2empi[famid]:
             row = iid2ped[pid]
-            trait_value = empi2trait.get(pid, None)
+            trait_value = empi2trait.get(pid, [None])
+            if not type(trait_value) is list:
+                trait_value = [trait_value]
             trait_ped.append( row + [trait_value] )
-
+    
     if verbose:
         print >> sys.stderr, "ok."
         print >> sys.stderr, "Found %d individuals that are members of families with at least 2 acertained individual(s)." % len(trait_ped)
@@ -339,18 +359,21 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, f
     solar_ped = list()
     solar_phen = list()
     for row in trait_ped:
-        famid, iid, fid, mid, sex, age, trait = row
-
+        famid, iid, fid, mid, sex, age, traits = row
+        
         solar_ped.append( [famid, iid, fid, mid, sex] )
-
-        if trait is None:
-            trait = ''
+        
+        if traits[0] is None:
+            if bivariate:
+                traits = ['', '']
+            else:
+                traits = ['']
             age = ''
-
+        
         if use_proband:
-            solar_phen.append([iid, trait, age, 1 if iid == fam2proband[famid] else 0])
+            solar_phen.append([iid] + traits + [age, 1 if iid == fam2proband[famid] else 0])
         else:
-            solar_phen.append([iid, trait, age])
+            solar_phen.append([iid] + traits + [age])
 
     if verbose:
         print >> sys.stderr, "ok. (%d individuals in pedigree.)" % len(solar_ped)
@@ -365,50 +388,104 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, f
 
     if verbose:
         print >> sys.stderr, "Writing .ped and .phen files for solar...",
-
+    
     ped_fh = open(os.path.join(solar_working_path, 'pedigree.ped'), 'w')
     writer = csv.writer(ped_fh, delimiter=',')
     writer.writerow(['famid', 'id', 'fa', 'mo', 'sex'])
     writer.writerows(solar_ped)
     ped_fh.close()
-
+    
     phen_fh = open(os.path.join(solar_working_path, 'phenotypes.phen'), 'w')
     writer = csv.writer(phen_fh, delimiter=',', quoting=csv.QUOTE_NONE)
-
+    
+    phen_header = ['id', 'pheno']
+    
+    if bivariate:
+        phen_header.append('pheno2')
+    
+    phen_header.append('age')
+    
     if use_proband:
-        writer.writerow(['id', 'pheno', 'age', 'proband'])
-    else:
-        writer.writerow(['id', 'pheno', 'age'])
-
+        phen_header.append('proband')
+    
+    writer.writerow(phen_header)
+    
     writer.writerows(solar_phen)
     phen_fh.close()
-
+    
     if verbose:
         print >> sys.stderr, "ok."
         print >> sys.stderr, "Writing out tcl scripts to run solar...",
-
+    
     # load_pedigree.tcl
     tcl_fh = open(os.path.join(solar_working_path, 'load_pedigree.tcl'), 'w')
     tcl_fh.write(tcl_load_string)
     tcl_fh.close()
-
+    
     # run_analysis.tcl
     tcl_fh = open(os.path.join(solar_working_path, 'run_analysis.tcl'), 'w')
     if trait_type == TRAIT_TYPE_QUANTITATIVE:
-        tcl_fh.write(tcl_analysis_string_q)
+        if bivariate:
+            tcl_fh.write(tcl_analysis_string_q_bivar)
+        else:
+            tcl_fh.write(tcl_analysis_string_q)
     elif trait_type == TRAIT_TYPE_BINARY:
         tcl_fh.write(tcl_analysis_string_b)
     else:
         raise Exception("Error: Impossible trait type encountered: %s" % trait_type)
     tcl_fh.close()
-
+    
     if verbose:
         print >> sys.stderr, "ok."
-
+    
     if verbose:
         print >> sys.stderr, "Finished building working directories."
-
+    
+    # debugging
+    #sys.exit(10)
     return
+
+def estimate_rhop(rhop_results, ci=95., show_warnings=True, show_errors=True):
+    
+    num_converged = 0
+    num_significant = 0
+    sig_rhops = list()
+    
+    pcutoff = 0.05
+    
+    converged = list()
+    
+    for rhop, pval in rhop_results:
+        if rhop == None or pval == None:
+            continue
+        converged.append( (rhop, pval) )
+    
+    num_converged = len(converged)
+    
+    for rhop, pval in converged:
+        if pval < pcutoff:
+            num_significant += 1
+            sig_rhops.append((rhop, pval))
+    
+    if num_significant == 0:
+        if show_errors:
+            print >> sys.stderr, "ERROR: There are no significant and converged estimates available."
+        return False
+    
+    if num_significant < 30:
+        if show_warnings:
+            print >> sys.stderr, "WARNING: There are fewer than 30 (%d) significant and converged estimates." % num_significant
+    
+    rhop, solarpval = sorted(sig_rhops)[len(sig_rhops)/2]
+    rhop_estimates = zip(*sig_rhops)[0]
+    
+    cidiff = (100.-ci)/2.
+    rhoplo = numpy.percentile(rhop_estimates, cidiff)
+    rhophi = numpy.percentile(rhop_estimates, 100.-cidiff)
+    posa = num_significant/float(num_converged)
+    
+    return rhop, rhoplo, rhophi, solarpval, num_converged, num_significant, posa
+    
 
 def extract_convered_estimates(h2r_results, edge_eps, denoise_eps):
     converged = list()
@@ -459,7 +536,7 @@ def estimate_h2o(h2r_results, ci = 95., show_warnings=True, show_errors=True):
 
     return h2o, h2olo, h2ohi, solarerr, solarpval, num_converged, num_significant, posa
 
-def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts, solar_dir, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house=False, nprocs=1, verbose=False, buildonly=False):
+def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts, solar_dir, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, bivariate=False, house=False, nprocs=1, verbose=False, buildonly=False):
     """
     Run the bootstrapping algorithm to estimate the observational heritability for both
     the AE and ACE (if house=True) models of heritability. Results of this funciton can be parsed with
@@ -468,32 +545,29 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
 
     ae_h2r_results = list()
     ace_h2r_results = list()
+    ae_rhop_results = list()
+    
     def log_solar_results(single_results):
         ae_h2r_results.append((single_results['AE']['h2r'], single_results['AE']['err'], single_results['AE']['pvalue']))
         ace_h2r_results.append((single_results['ACE']['h2r'], single_results['ACE']['err'], single_results['ACE']['pvalue']))
         if verbose and not buildonly:
-                aeh2 = single_results['AE']['h2r']
-                aeer = single_results['AE']['err']
-                aepv = single_results['AE']['pvalue']
-                if aeh2 is None:
-                    aeh2 = numpy.nan
-                if aeer is None:
-                    aeer = numpy.nan
-                if aepv is None:
-                    aepv = numpy.nan
-
-                aceh2 = single_results['ACE']['h2r']
-                aceer = single_results['ACE']['err']
-                acepv = single_results['ACE']['pvalue']
-                if aceh2 is None:
-                    aceh2 = numpy.nan
-                if aceer is None:
-                    aceer = numpy.nan
-                if acepv is None:
-                    acepv = numpy.nan
-
+                aeh2 = numpy.nan if single_results['AE']['h2r'] is None else single_results['AE']['h2r']
+                aeer = numpy.nan if single_results['AE']['err'] is None else single_results['AE']['err']
+                aepv = numpy.nan if single_results['AE']['pvalue'] is None else single_results['AE']['pvalue']
+                aceh2 = numpy.nan if single_results['ACE']['h2r'] is None else single_results['ACE']['h2r']
+                aceer = numpy.nan if single_results['ACE']['err'] is None else single_results['ACE']['err']
+                acepv = numpy.nan if single_results['ACE']['pvalue'] is None else single_results['ACE']['pvalue']
                 print >> sys.stderr, "%10s %15s %5d %5d %7.2f %7.2f %10.2e %7.2f %7.2f %10.2e %10.4f" % (icd9, eth, num_families, len(ae_h2r_results), aeh2, aeer, aepv, aceh2, aceer, acepv, single_results['APF'])
-
+    
+    def log_solar_results_bivar(single_results):
+        ae_rhop_results.append((single_results['AE']['rhop'], single_results['AE']['pvalue']))
+        if verbose and not buildonly:
+                rhop = numpy.nan if single_results['AE']['rhop'] is None else single_results['AE']['rhop']
+                pval = numpy.nan if single_results['AE']['pvalue'] is None else single_results['AE']['pvalue']
+                print >> sys.stderr, "%10s %15s %5d %5d %7.2f %7.2f %10.4f" % (icd9, eth, num_families, len(ae_rhop_results), rhop, pval, single_results['APF'])
+    
+    logging_function = log_solar_results if not bivariate else log_solar_results_bivar
+    
     if num_families > len(families_with_case[icd9]):
         print >> sys.stderr, "Number of families to be sampled (%d) is larger than what is available (%d)." % (num_families, len(families_with_case[icd9]))
     else:
@@ -519,18 +593,22 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
                             use_proband,
                             house,
                             verbose,
-                            buildonly)
+                            buildonly,
+                            bivariate)
             if nprocs == 1:
-                log_solar_results(solar(*solar_args))
+                logging_function(solar(*solar_args))
             else:
-                pool.apply_async(solar, args = solar_args, callback = log_solar_results)
-
+                pool.apply_async(solar, args = solar_args, callback = logging_function)
+        
         pool.close()
         pool.join()
+    
+    if bivariate:
+        return ae_rhop_results
+    else:
+        return ae_h2r_results, ace_h2r_results
 
-    return ae_h2r_results, ace_h2r_results
-
-def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house, verbose, buildonly):
+def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house, verbose, buildonly, bivariate):
     """
     Setup the data for solar and run solar for the given condition.
 
@@ -555,16 +633,20 @@ def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, 
                            all_fam2proband[icd9],
                            use_proband,
                            trait_type,
+                           bivariate=bivariate,
                            verbose=False, # this one is kindof annoying if it is on
                            family_ids_only=chosen_families)
 
     if not buildonly:
         #print >> sys.stderr, h2_path
-        results = single_solar_run(h2_path, house, verbose)
+        results = single_solar_run(h2_path, house, bivariate, verbose)
         results['APF'] = apf
         shutil.rmtree(h2_path)
     else:
-        results = {'AE':{'h2r':None, 'err':None, 'pvalue':None}, 'ACE':{'h2r':None, 'err':None, 'pvalue':None}, 'APF': apf}
+        if bivariate:
+            results = {'AE':{'rhop':None, 'pvalue':None}, 'APF': apf}
+        else:
+            results = {'AE':{'h2r':None, 'err':None, 'pvalue':None}, 'ACE':{'h2r':None, 'err':None, 'pvalue':None}, 'APF': apf}
 
     return results
 
@@ -597,7 +679,31 @@ def parse_polygenic_out(polygenic_out_fn, verbose):
 
     return {'h2r':h2r, 'err':h2r_err, 'pvalue':p}
 
-def single_solar_run(h2_path, house=False, verbose=False, really_verbose=False):
+def parse_polygenic_out_bivar(polygenic_out_fn, verbose):
+    
+    if verbose:
+        print >> sys.stderr, "Parsing polygenic output to get RhoP values..."
+    
+    if not os.path.exists(polygenic_out_fn):
+        print >> sys.stderr, "WARNING: No polygenic outfile found at: %s" % polygenic_out_fn
+        rhop, p = None, None
+    else:
+        polygenic_out_fh = open(polygenic_out_fn)
+        results = polygenic_out_fh.read().split('\n')
+        
+        rhop_raw = [row.strip() for row in results if row.find('RhoP') != -1]
+        try:
+            rhop = float(rhop_raw[0].split()[5])
+            p = float(rhop_raw[1].split()[6])
+        except IndexError:
+            if verbose:
+                print >> sys.stderr, "FAILED. SOLAR failed to run. Could be a convergence error."
+            rhop = None
+            p = None
+        
+    return {'rhop':rhop, 'pvalue':p}
+
+def single_solar_run(h2_path, house=False, bivariate=False, verbose=False, really_verbose=False):
     """
     Runs solar for the AE and ACE (if house=True) models, returns parsed results.
 
@@ -614,23 +720,34 @@ def single_solar_run(h2_path, house=False, verbose=False, really_verbose=False):
         print >> sys.stderr, "Running analysis without house effects..."
         print >> sys.stderr, "cd %s > /dev/null && solar runanalysis > /dev/null && cd - > /dev/null " % solar_working_path
     os.system("cd %s > /dev/null && solar runanalysis > /dev/null && cd - > /dev/null " % solar_working_path)
-
-    polygenic_out_fn = os.path.join(solar_working_path, 'pheno', 'polygenic.out')
-
-    ae_results = parse_polygenic_out(polygenic_out_fn, verbose=really_verbose)
-
-    if house:
-        if really_verbose:
-            print >> sys.stderr, "Running analysis with house effects..."
-            print >> sys.stderr, "cd %s > /dev/null && solar runanalysishouse > /dev/null && cd - > /dev/null " % solar_working_path
-        os.system("cd %s > /dev/null && solar runanalysishouse > /dev/null && cd - > /dev/null " % solar_working_path)
-        ace_results = parse_polygenic_out(polygenic_out_fn, verbose=really_verbose)
+    
+    if bivariate:
+        polygenic_out_fn = os.path.join(solar_working_path, 'pheno.pheno2', 'polygenic.out')
+        ae_results = parse_polygenic_out_bivar(polygenic_out_fn, verbose=really_verbose)
     else:
-        ace_results = {'h2r':None, 'err':None, 'pvalue':None}
-
+        polygenic_out_fn = os.path.join(solar_working_path, 'pheno', 'polygenic.out')
+        ae_results = parse_polygenic_out(polygenic_out_fn, verbose=really_verbose)
+    
+    ace_results = {'h2r':None, 'err':None, 'pvalue':None}
+    if house:
+        if bivariate:
+            if verbose:
+                print >> sys.stderr, "WARNING: Household effect not implemented for bivariate analysis."
+        else:
+            if really_verbose:
+                print >> sys.stderr, "Running analysis with house effects..."
+                print >> sys.stderr, "cd %s > /dev/null && solar runanalysishouse > /dev/null && cd - > /dev/null " % solar_working_path
+        
+            os.system("cd %s > /dev/null && solar runanalysishouse > /dev/null && cd - > /dev/null " % solar_working_path)
+        
+            ace_results = parse_polygenic_out(polygenic_out_fn, verbose=really_verbose)
+    
     if really_verbose:
         print >> sys.stderr, 'AE', "%(h2r)s %(err)s %(pvalue)s" % ae_results
-        if house:
+        if house and not bivariate:
             print >> sys.stderr, 'ACE', "%(h2r)s %(err)s %(pvalue)s" % ace_results
-
-    return {'AE': ae_results, 'ACE': ace_results}
+    
+    if bivariate:
+        return {'AE': ae_results}
+    else:
+        return {'AE': ae_results, 'ACE': ace_results}

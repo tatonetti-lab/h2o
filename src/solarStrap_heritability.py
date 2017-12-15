@@ -12,7 +12,7 @@ USAGE EXAMPLE
 python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [nfam=0.15] [sd=path/to/working_directory] [ace=no] [verbose=no] [samples=200] [buildonly=no] [proband=yes]
 
 """
-__version__ = 0.9
+__version__ = 0.91
 
 
 import os
@@ -42,6 +42,7 @@ from h2o_utility import random_string
 from h2o_utility import solar_strap
 from h2o_utility import prevelance
 from h2o_utility import estimate_h2o
+from h2o_utility import estimate_rhop
 
 from h2o_utility import TRAIT_TYPE_BINARY
 from h2o_utility import TRAIT_TYPE_QUANTITATIVE
@@ -91,16 +92,33 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
     fh = gzip.open(trait_path)
     reader = csv.reader(fh, delimiter='\t')
     reader.next()
-
+    
+    bivariate = dict()
     for empi, icd9, value in reader:
-        if empi in empi2fam:
+        bivariate[icd9] = False
+        if not empi in empi2fam:
+            continue
+        
+        if value.find('|') != -1:
+            #print >> sys.stderr, "Found bivariate trait."
+            bivariate[icd9] = True
+            if _DT_:
+                raise Exception("Bivariate analysis can only be performed on quantitative traits for trait: %s." % icd9)
+            
+            values = map(float, value.split('|'))
+            if len(values) > 2:
+                raise Exception("Bivariate analysis can only be perofmed with 2 traits, found %d, e.g.: %s for trait: %s" % (len(values), value, icd9))
+            
+            all_traits[icd9][empi] = values
+        else:
             all_traits[icd9][empi] = float(value)
 
     available_diagnoses = sorted(all_traits.keys())
     diags_to_process = available_diagnoses
     diag2idx = dict([(diag, idx) for idx, diag in enumerate(diags_to_process)])
-    print >> sys.stderr, "Loaded data for %d phenotypes." % len(all_traits.keys())
-
+    nbivar = sum(bivariate.values())
+    print >> sys.stderr, "Loaded data for %d phenotypes (%d %s bivariate)." % (len(all_traits.keys()), nbivar, 'is' if nbivar == 1 else 'are')
+    
     if not diag_slice is None:
         if len(diag_slice) == 1:
             start = diag_slice[0]
@@ -129,7 +147,11 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
     for fam_id, members in fam2empi.items():
         for icd9 in diags_to_process:
             all_fam2count[icd9][fam_id] = sum([1 for e in members if e in all_traits[icd9]])
-            all_fam2case[icd9][fam_id] = sum([all_traits[icd9][e] for e in members if e in all_traits[icd9]])
+            
+            # NOTE: The following will be nonsensical for Quantitative Traits, this is only
+            # NOTE: used for Dichotomous traits.
+            all_fam2case[icd9][fam_id] = sum([all_traits[icd9][e]==1 for e in members if e in all_traits[icd9]])
+            
             # There are two scenarios for deciding which families to sample from:
             # 1) The preferred one for observational heritability is that only families
             # with at least one individual with the trait (disease) are included. We do
@@ -241,7 +263,7 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                     print >> sys.stderr, "Not enough families available, skipping."
                     continue
 
-                ae_h2r_results, ace_h2r_results = solar_strap(num_families,
+                solar_strap_results = solar_strap(num_families,
                                                               families_with_case[eth],
                                                               icd9,
                                                               trait_type_code,
@@ -255,28 +277,42 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                                                               all_fam2count,
                                                               all_fam2proband,
                                                               use_proband,
+                                                              bivariate[icd9],
                                                               house,
                                                               nprocs,
                                                               verbose,
                                                               buildonly)
-                for h2o, err, pval in ae_h2r_results:
-                    runs_writer.writerow([icd9, eth, num_families, 'AE', h2o, err, pval])
+                
+                if not bivariate[icd9]:
+                    ae_h2r_results, ace_h2r_results = solar_strap_results
+                    for h2o, err, pval in ae_h2r_results:
+                        runs_writer.writerow([icd9, eth, num_families, 'AE', h2o, err, pval])
 
-                estimates = estimate_h2o(ae_h2r_results)
-                if estimates:
-                    h2o, h2olo, h2ohi, solarerr, solarpval, num_converged, num_significant, posa = estimates
-                    print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'AE', h2o, solarerr, solarpval, num_attempts, num_converged, num_significant, posa)
-                    results_writer.writerow([icd9, eth, num_families, 'AE', h2o, h2olo, h2ohi, solarerr, solarpval, num_attempts, num_converged, num_significant, posa])
-
-                if house:
-                    for h2o, err, pval in ace_h2r_results:
-                        runs_writer.writerow([icd9, eth, num_families, 'ACE', h2o, err, pval])
-
-                    estimates = estimate_h2o(ace_h2r_results)
+                    estimates = estimate_h2o(ae_h2r_results)
                     if estimates:
                         h2o, h2olo, h2ohi, solarerr, solarpval, num_converged, num_significant, posa = estimates
-                        print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'ACE', h2o, solarerr, solarpval, num_attempts, num_converged, num_significant, posa)
-                        results_writer.writerow([icd9, eth, num_families, 'ACE', h2o, h2olo, h2ohi, solarerr, solarpval, num_attempts, num_converged, num_significant, posa])
+                        print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'AE', h2o, solarerr, solarpval, num_attempts, num_converged, num_significant, posa)
+                        results_writer.writerow([icd9, eth, num_families, 'AE', h2o, h2olo, h2ohi, solarerr, solarpval, num_attempts, num_converged, num_significant, posa])
+
+                    if house:
+                        for h2o, err, pval in ace_h2r_results:
+                            runs_writer.writerow([icd9, eth, num_families, 'ACE', h2o, err, pval])
+
+                        estimates = estimate_h2o(ace_h2r_results)
+                        if estimates:
+                            h2o, h2olo, h2ohi, solarerr, solarpval, num_converged, num_significant, posa = estimates
+                            print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'ACE', h2o, solarerr, solarpval, num_attempts, num_converged, num_significant, posa)
+                            results_writer.writerow([icd9, eth, num_families, 'ACE', h2o, h2olo, h2ohi, solarerr, solarpval, num_attempts, num_converged, num_significant, posa])
+                else:
+                    rhop_results = solar_strap_results
+                    for rhop, pval in rhop_results:
+                        runs_writer.writerow([icd9, eth, num_families, 'AE', rhop, pval])
+                    
+                    estimates = estimate_rhop(rhop_results)
+                    if estimates:
+                        rhop, rhoplo, rhophi, solarpval, num_converged, num_significant, posa = estimates
+                        print "%10s %10s %5d %4s %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'AE', rhop, solarpval, num_attempts, num_converged, num_significant, posa)
+                        results_writer.writerow([icd9, eth, num_families, 'AE', rhop, rhoplo, rhophi, solarpval, num_attempts, num_converged, num_significant, posa])
 
         # clean up
         shutil.rmtree(icd9_path)
@@ -294,7 +330,7 @@ if __name__ == '__main__':
         args['name'] = random_string(5)
 
     print >> sys.stderr, ""
-    print >> sys.stderr, "SolarStrap v%4.1f - Estimate heritability of disease using observational data." % __version__
+    print >> sys.stderr, "SolarStrap v%4.2f - Estimate heritability of disease using observational data." % __version__
     print >> sys.stderr, "-----------------------------------------------------------------------------"
     print >> sys.stderr, "Summary results will be saved in %(sd)s/%(name)s_solar_strap_results.csv" % args
     print >> sys.stderr, "Results from each bootstrap will be saved at %(sd)s/%(name)s_solar_strap_allruns.csv" % args
