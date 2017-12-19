@@ -72,7 +72,7 @@ proc runanalysis {} {
     trait pheno pheno2
     covariates sex age
     tdist
-    polygenic -testrhop
+    polygenic -testrhop -testrhog -testrhoe
 }
 proc runanalysishouse {} {
     model new
@@ -80,7 +80,7 @@ proc runanalysishouse {} {
     covariates sex age
     house
     tdist
-    polygenic -testrhop
+    polygenic -testrhop -testrhog -testrhoe
 }
 """
 
@@ -445,7 +445,7 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, f
     #sys.exit(10)
     return
 
-def estimate_rhop(rhop_results, ci=95., show_warnings=True, show_errors=True):
+def estimate_rhog(bivar_results, ci=95., show_warnings=True, show_errors=True):
     
     num_converged = 0
     num_significant = 0
@@ -455,26 +455,110 @@ def estimate_rhop(rhop_results, ci=95., show_warnings=True, show_errors=True):
     
     converged = list()
     
-    for rhop, pval in rhop_results:
-        if rhop == None or pval == None:
+    for row in bivar_results:
+        rhog, rhog_err, rhog_pval0, rhog_pval1 = row[5:9]
+        if rhog is None or rhog_err is None or rhog_pval0 is None or rhog_pval1 is None:
             continue
-        converged.append( (rhop, pval) )
+        converged.append( (rhog, rhog_err, rhog_pval0, rhog_pval1) )
     
     num_converged = len(converged)
-    
-    for rhop, pval in converged:
-        if pval < pcutoff:
+    for rhog, rhog_err, rhog_pval0, rhog_pval1 in converged:
+        if rhog_pval0 < pcutoff:
             num_significant += 1
-            sig_rhops.append((rhop, pval))
+            sig_rhops.append((rhog, rhog_err, rhog_pval0, rhog_pval1))
     
     if num_significant == 0:
         if show_errors:
-            print >> sys.stderr, "ERROR: There are no significant and converged estimates available."
-        return False
+            print >> sys.stderr, "ERROR: There are no significant and converged estimates available for RhoG."
+        return tuple([numpy.nan]*9)
     
     if num_significant < 30:
         if show_warnings:
-            print >> sys.stderr, "WARNING: There are fewer than 30 (%d) significant and converged estimates." % num_significant
+            print >> sys.stderr, "WARNING: There are fewer than 30 (%d) significant and converged estimates for RhoG." % num_significant
+    
+    rhog, solarerr, solarpval0, solarpval1 = sorted(sig_rhops)[len(sig_rhops)/2]
+    rhog_estimates = zip(*sig_rhops)[0]
+    
+    cidiff = (100.-ci)/2.
+    rhoglo = numpy.percentile(rhog_estimates, cidiff)
+    rhoghi = numpy.percentile(rhog_estimates, 100.-cidiff)
+    posa = num_significant/float(num_converged)
+    
+    return rhog, rhoglo, rhoghi, solarerr, solarpval0, solarpval1, num_converged, num_significant, posa
+
+def estimate_rhoe(bivar_results, ci=95., show_warnings=True, show_errors=True):
+    
+    num_converged = 0
+    num_significant = 0
+    sig_rhops = list()
+    
+    pcutoff = 0.05
+    
+    converged = list()
+    
+    for row in bivar_results:
+        rhoe, rhoe_err, rhoe_pvalue = row[2:5]
+        if rhoe is None or rhoe_err is None or rhoe_pvalue is None:
+            continue
+        converged.append( (rhoe, rhoe_err, rhoe_pvalue) )
+    
+    num_converged = len(converged)
+    for rhoe, rhoe_err, rhoe_pvalue in converged:
+        if rhoe_pvalue < pcutoff:
+            num_significant += 1
+            sig_rhops.append((rhoe, rhoe_err, rhoe_pvalue))
+    
+    if num_significant == 0:
+        if show_errors:
+            print >> sys.stderr, "ERROR: There are no significant and converged estimates available for RhoE."
+        return tuple([numpy.nan]*8)
+    
+    if num_significant < 30:
+        if show_warnings:
+            print >> sys.stderr, "WARNING: There are fewer than 30 (%d) significant and converged estimates for RhoE." % num_significant
+    
+    rhoe, solarerr, solarpval = sorted(sig_rhops)[len(sig_rhops)/2]
+    rhoe_estimates = zip(*sig_rhops)[0]
+    
+    cidiff = (100.-ci)/2.
+    rhoelo = numpy.percentile(rhoe_estimates, cidiff)
+    rhoehi = numpy.percentile(rhoe_estimates, 100.-cidiff)
+    posa = num_significant/float(num_converged)
+    
+    return rhoe, rhoelo, rhoehi, solarerr, solarpval, num_converged, num_significant, posa
+
+def estimate_rhop(bivar_results, ci=95., show_warnings=True, show_errors=True):
+    
+    num_converged = 0
+    num_significant = 0
+    sig_rhops = list()
+    
+    pcutoff = 0.05
+    
+    converged = list()
+    
+    for row in bivar_results:
+        rhop, rhop_pvalue = row[:2]
+        if rhop is None or rhop_pvalue is None:
+            continue
+        converged.append( (rhop, rhop_pvalue) )
+    
+    num_converged = len(converged)
+    
+    for row in converged:
+        rhop, rhop_pvalue = row[:2]
+        if rhop_pvalue < pcutoff:
+            num_significant += 1
+            sig_rhops.append((rhop, rhop_pvalue))
+    
+    if num_significant == 0:
+        if show_errors:
+            print >> sys.stderr, "ERROR: There are no significant and converged estimates available for RhoP."
+        return tuple([numpy.nan]*7)
+    
+    if num_significant < 30:
+        if show_warnings:
+            print >> sys.stderr, "WARNING: There are fewer than 30 (%d) significant and converged estimates for RhoP." % num_significant
     
     rhop, solarpval = sorted(sig_rhops)[len(sig_rhops)/2]
     rhop_estimates = zip(*sig_rhops)[0]
@@ -545,7 +629,7 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
 
     ae_h2r_results = list()
     ace_h2r_results = list()
-    ae_rhop_results = list()
+    ae_bivar_results = list()
     
     def log_solar_results(single_results):
         ae_h2r_results.append((single_results['AE']['h2r'], single_results['AE']['err'], single_results['AE']['pvalue']))
@@ -560,18 +644,29 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
                 print >> sys.stderr, "%10s %15s %5d %5d %7.2f %7.2f %10.2e %7.2f %7.2f %10.2e %10.4f" % (icd9, eth, num_families, len(ae_h2r_results), aeh2, aeer, aepv, aceh2, aceer, acepv, single_results['APF'])
     
     def log_solar_results_bivar(single_results):
-        ae_rhop_results.append((single_results['AE']['rhop'], single_results['AE']['pvalue']))
+        ae_bivar_results.append((
+            single_results['AE']['rhop'], single_results['AE']['rhop_pvalue'],
+            single_results['AE']['rhoe'], single_results['AE']['rhoe_err'], single_results['AE']['rhoe_pvalue'],
+            single_results['AE']['rhog'], single_results['AE']['rhog_err'], single_results['AE']['rhog_pval0'], single_results['AE']['rhog_pval1']))
         if verbose and not buildonly:
                 rhop = numpy.nan if single_results['AE']['rhop'] is None else single_results['AE']['rhop']
-                pval = numpy.nan if single_results['AE']['pvalue'] is None else single_results['AE']['pvalue']
-                print >> sys.stderr, "%10s %15s %5d %5d %7.2f %7.2f %10.4f" % (icd9, eth, num_families, len(ae_rhop_results), rhop, pval, single_results['APF'])
+                rhop_pvalue = numpy.nan if single_results['AE']['rhop_pvalue'] is None else single_results['AE']['rhop_pvalue']
+                rhoe = numpy.nan if single_results['AE']['rhoe'] is None else single_results['AE']['rhoe']
+                rhoe_err = numpy.nan if single_results['AE']['rhoe_err'] is None else single_results['AE']['rhoe_err']
+                rhoe_pvalue = numpy.nan if single_results['AE']['rhoe_pvalue'] is None else single_results['AE']['rhoe_pvalue']
+                rhog = numpy.nan if single_results['AE']['rhog'] is None else single_results['AE']['rhog']
+                rhog_err = numpy.nan if single_results['AE']['rhog_err'] is None else single_results['AE']['rhog_err']
+                rhog_pval0 = numpy.nan if single_results['AE']['rhog_pval0'] is None else single_results['AE']['rhog_pval0']
+                rhog_pval1 = numpy.nan if single_results['AE']['rhog_pval1'] is None else single_results['AE']['rhog_pval1']
+                
+                print >> sys.stderr, icd9, eth, num_families, len(ae_bivar_results), rhop, rhop_pvalue, rhoe, rhoe_err, rhoe_pvalue, rhog, rhog_err, rhog_pval0, rhog_pval1
     
     logging_function = log_solar_results if not bivariate else log_solar_results_bivar
     
     if num_families > len(families_with_case[icd9]):
         print >> sys.stderr, "Number of families to be sampled (%d) is larger than what is available (%d)." % (num_families, len(families_with_case[icd9]))
     else:
-        if verbose and not buildonly:
+        if verbose and not buildonly and not bivariate:
             print >> sys.stderr, "%10s %15s %5s %5s %7s %7s %10s %7s %7s %10s %10s" % ('Trait', 'Ethnicity', 'NFam', 'Samp', 'AE h2', 'err', 'pval', 'ACE h2', 'err', 'pval', 'Sample AFP')
 
         pool = mp.Pool(nprocs)
@@ -604,7 +699,7 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
         pool.join()
     
     if bivariate:
-        return ae_rhop_results
+        return ae_bivar_results
     else:
         return ae_h2r_results, ace_h2r_results
 
@@ -615,7 +710,7 @@ def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, 
     """
 
     # if the h2_path exists, we remove it
-    if os.path.exists(h2_path):
+    if os.path.exists(h2_path) and not buildonly:
         shutil.rmtree(h2_path)
 
     available_families = [fid for fid in families_with_case[icd9] if eth == 'ALL' or fam2eth[fid] == eth]
@@ -644,7 +739,7 @@ def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, 
         shutil.rmtree(h2_path)
     else:
         if bivariate:
-            results = {'AE':{'rhop':None, 'pvalue':None}, 'APF': apf}
+            results = {'AE':{'rhop':None, 'rhop_pvalue':None, 'rhoe':None, 'rhoe_err':None, 'rhoe_pvalue':None, 'rhog':None, 'rhog_err':None, 'rhog_pval0':None, 'rhog_pval1':None }, 'APF': apf}
         else:
             results = {'AE':{'h2r':None, 'err':None, 'pvalue':None}, 'ACE':{'h2r':None, 'err':None, 'pvalue':None}, 'APF': apf}
 
@@ -682,26 +777,65 @@ def parse_polygenic_out(polygenic_out_fn, verbose):
 def parse_polygenic_out_bivar(polygenic_out_fn, verbose):
     
     if verbose:
-        print >> sys.stderr, "Parsing polygenic output to get RhoP values..."
+        print >> sys.stderr, "Parsing polygenic output to get bivariate parameter values..."
     
     if not os.path.exists(polygenic_out_fn):
         print >> sys.stderr, "WARNING: No polygenic outfile found at: %s" % polygenic_out_fn
-        rhop, p = None, None
+        rhop, rhop_pvalue = None, None
+        rhoe, rhoe_err, rhoe_pvalue = None, None, None
+        rhog, rhog_err, rhog_pval0, rhog_pval1 = None, None, None, None
+        
     else:
         polygenic_out_fh = open(polygenic_out_fn)
         results = polygenic_out_fh.read().split('\n')
         
-        rhop_raw = [row.strip() for row in results if row.find('RhoP') != -1]
+        # Extract RhoP
+        rhop_raw = [row.strip() for row in results if row.find('Derived Estimate of RhoP') != -1][0]
+        rhop_pvalue_raw = [row.strip() for row in results if row.find('RhoP different from zero') != -1][0]
+        
         try:
-            rhop = float(rhop_raw[0].split()[5])
-            p = float(rhop_raw[1].split()[6])
-        except IndexError:
+            rhop = float(rhop_raw.split()[5])
+            p = float(rhop_pvalue_raw.split()[6])
+        except (IndexError, ValueError):
             if verbose:
                 print >> sys.stderr, "FAILED. SOLAR failed to run. Could be a convergence error."
             rhop = None
             p = None
         
-    return {'rhop':rhop, 'pvalue':p}
+        # Extract RhoE
+        rhoe_raw = [row.strip() for row in results if row.find('RhoE is') != -1][0]
+        rhoe_err_raw = [row.strip() for row in results if row.find('RhoE Std. Error') != -1][0]
+        
+        try:
+            rhoe = float(rhoe_raw.split()[2])
+            rhoe_pvalue = float(rhoe_raw.split()[5])
+            rhoe_err = float(rhoe_err_raw.split()[3])
+        except (IndexError, ValueError):
+            if verbose:
+                print >> sys.stderr, "FAILED. SOLAR failed to run. Could be a convergence error."
+            rhoe = None
+            rhoe_pvalue = None
+            rhoe_err = None
+        
+        # Extract RhoG
+        rhog_raw = [row.strip() for row in results if row.find('RhoG is') != -1][0]
+        rhog_err_raw = [row.strip() for row in results if row.find('RhoG Std. Error') != -1][0]
+        rhog_pvalue_raw = [row.strip() for row in results if row.find('RhoG different from') != -1]
+        
+        try:
+            rhog = float(rhog_raw.split()[2])
+            rhog_err = float(rhog_err_raw.split()[3])
+            rhog_pval0 = float(rhog_pvalue_raw[0].split()[6])
+            rhog_pval1 = float(rhog_pvalue_raw[1].split()[6])
+        except (IndexError, ValueError):
+            if verbose:
+                print >> sys.stderr, "FAILED. SOLAR failed to run. Could be a convergence error."
+            rhog = None
+            rhog_err = None
+            rhog_pval0 = None
+            rhog_pval1 = None
+    
+    return {'rhop':rhop, 'rhop_pvalue':p, 'rhoe':rhoe, 'rhoe_err':rhoe_err, 'rhoe_pvalue':rhoe_pvalue, 'rhog':rhog, 'rhog_err':rhog_err, 'rhog_pval0':rhog_pval0, 'rhog_pval1':rhog_pval1}
 
 def single_solar_run(h2_path, house=False, bivariate=False, verbose=False, really_verbose=False):
     """

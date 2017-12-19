@@ -42,7 +42,7 @@ from h2o_utility import random_string
 from h2o_utility import solar_strap
 from h2o_utility import prevelance
 from h2o_utility import estimate_h2o
-from h2o_utility import estimate_rhop
+from h2o_utility import estimate_rhop, estimate_rhoe, estimate_rhog
 
 from h2o_utility import TRAIT_TYPE_BINARY
 from h2o_utility import TRAIT_TYPE_QUANTITATIVE
@@ -112,7 +112,8 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
             all_traits[icd9][empi] = values
         else:
             all_traits[icd9][empi] = float(value)
-
+    
+    
     available_diagnoses = sorted(all_traits.keys())
     diags_to_process = available_diagnoses
     diag2idx = dict([(diag, idx) for idx, diag in enumerate(diags_to_process)])
@@ -231,7 +232,17 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
     runs_file = open(os.path.join(solar_dir, '%s_solar_strap_allruns.csv' % prefix), 'w')
     runs_writer = csv.writer(runs_file)
     runs_writer.writerow(['trait', 'ethnicity', 'num_families', 'model', 'h2o', 'solarerr', 'pvalue'])
-
+    
+    bivar_results_file = open(os.path.join(solar_dir, '%s_solar_strap_bivariate_results.csv' % prefix), 'w')
+    bivar_results_writer = csv.writer(bivar_results_file)
+    bivar_results_writer.writerow(['traitt', 'ethnicity', 'num_families', 'model'] +
+        ['rhop', 'rhoplo', 'rhophi', 'rhopsolarpval', 'rhop_num_att', 'rhop_num_conv', 'rhop_num_sig', 'rhop_posa'] + 
+        ['rhoe', 'rhoelo', 'rhoehi', 'rhoesolarerr', 'rhoesolarpval', 'rhoe_num_att', 'rhoe_num_conv', 'rhoe_num_sig', 'rhoe_posa'] + 
+        ['rhog', 'rhoglo', 'rhoghi', 'rhogsolarerr', 'rhogsolarpval0', 'rhogsolarpval1', 'rhog_num_att', 'rhog_num_conv', 'rhog_num_sig', 'rhog_posa'])
+    bivar_runs_file = open(os.path.join(solar_dir, '%s_solar_strap_bivariate_allruns.csv' % prefix), 'w')
+    bivar_runs_writer = csv.writer(bivar_runs_file)
+    bivar_runs_writer.writerow(['trait', 'ethnicity', 'num_families', 'model', 'rhop', 'rhop_pvalue', 'rhoe', 'rhoe_err', 'rhoe_pvalue', 'rhog', 'rhog_err', 'rhog_pval0', 'rhog_pval1'])
+    
     if num_families_range is None:
         num_families_range = [0.15,]
 
@@ -304,19 +315,25 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                             print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'ACE', h2o, solarerr, solarpval, num_attempts, num_converged, num_significant, posa)
                             results_writer.writerow([icd9, eth, num_families, 'ACE', h2o, h2olo, h2ohi, solarerr, solarpval, num_attempts, num_converged, num_significant, posa])
                 else:
-                    rhop_results = solar_strap_results
-                    for rhop, pval in rhop_results:
-                        runs_writer.writerow([icd9, eth, num_families, 'AE', rhop, pval])
+                    for row in solar_strap_results:
+                        bivar_runs_writer.writerow([icd9, eth, num_families, 'AE'] + list(row))
                     
-                    estimates = estimate_rhop(rhop_results)
-                    if estimates:
-                        rhop, rhoplo, rhophi, solarpval, num_converged, num_significant, posa = estimates
-                        print "%10s %10s %5d %4s %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'AE', rhop, solarpval, num_attempts, num_converged, num_significant, posa)
-                        results_writer.writerow([icd9, eth, num_families, 'AE', rhop, rhoplo, rhophi, solarpval, num_attempts, num_converged, num_significant, posa])
-
+                    rhop_estimates = estimate_rhop(solar_strap_results)
+                    rhoe_estimates = estimate_rhoe(solar_strap_results)
+                    rhog_estimates = estimate_rhog(solar_strap_results)
+                    
+                    print "%10s %10s %5d %4s " % (icd9, eth, num_families, 'AE'),
+                    print "%7s %7s %7s %7s %7s %7s %7s " % rhop_estimates,
+                    print "%7s %7s %7s %7s %7s %7s %7s %7s " % rhoe_estimates,
+                    print "%7s %7s %7s %7s %7s %7s %7s %7s %7s " % rhog_estimates
+                    bivar_results_writer.writerow([icd9, eth, num_families, 'AE'] + list(rhop_estimates) + list(rhoe_estimates) + list(rhog_estimates))
+        
         # clean up
-        shutil.rmtree(icd9_path)
+        if not buildonly:
+            shutil.rmtree(icd9_path)
 
+    bivar_results_file.close()
+    bivar_runs_file.close()
     results_file.close()
     runs_file.close()
 
