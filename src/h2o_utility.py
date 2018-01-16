@@ -149,7 +149,10 @@ def load_demographics(demographic_file_path):
         empi2demog[empi] = dict(zip(demog_header, row[1:]))
 
         # re-map the race codes
-        if empi2demog[empi]['race'] == 'NA':
+        if empi2demog[empi]['race'] in ('EUR', 'AFR', 'AMR', 'EAS', 'SAS', 'UNK'):
+            if empi2demog[empi]['race'] == 'UNK':
+                empi2demog[empi]['race'] = 'Unknown'
+        elif empi2demog[empi]['race'] == 'NA':
             if empi2demog[empi]['ethnicity'] == 'W':
                 empi2demog[empi]['race'] = 'White'
             elif empi2demog[empi]['ethnicity'] == 'B':
