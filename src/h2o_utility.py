@@ -22,49 +22,6 @@ import time
 TRAIT_TYPE_QUANTITATIVE = 0
 TRAIT_TYPE_BINARY = 1
 
-# the typical id used for household when it is not directly available is
-# the mother id (mo)
-# we also explore the use of the family id
-tcl_load_string = """
-proc loadped {} {
-    field hhid mo
-    load pedigree pedigree.ped
-    load phenotypes phenotypes.phen
-}
-"""
-
-tcl_analysis_string_b = """
-proc runanalysis {} {
-    model new
-    trait pheno
-    covariates sex age
-    polygenic -screen
-}
-proc runanalysishouse {} {
-    model new
-    trait pheno
-    covariates sex age
-    house
-    polygenic -screen
-}
-"""
-
-tcl_analysis_string_q = """
-proc runanalysis {} {
-    trait pheno
-    covariates sex age
-    tdist
-    polygenic -screen
-}
-proc runanalysishouse {} {
-    model new
-    trait pheno
-    covariates sex age
-    house
-    tdist
-    polygenic -screen
-}
-"""
 
 def random_string(N):
     return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(N))
@@ -95,7 +52,8 @@ def assign_family_ethnicities(fam2empi, empi2demog, print_breakdown=True):
     eth2fam = defaultdict(set)
     fam2eth = dict()
     for fid, members in tqdm(fam2empi.items()):
-        family_ethnicities = [empi2demog[e]['race'] for e in members if empi2demog[e]['race'] != 'Unknown']
+
+        family_ethnicities = [empi2demog[e]['race'] for e in members if empi2demog.get(e,0) != 0 if empi2demog[e]['race'] != 'Unknown' ]
         if len(family_ethnicities) == 0:
             mode = 'Unknown'
         else:
@@ -109,6 +67,51 @@ def assign_family_ethnicities(fam2empi, empi2demog, print_breakdown=True):
             print >> sys.stderr, "\t%s: %d" % (eth, len(families))
 
     return eth2fam, fam2eth
+
+
+def load_covariates(cov_file_path):
+    """
+    Load covariates data from file.
+
+    """
+
+    print >> sys.stderr, "Loading patient covariates..."
+
+    # load covariates data (empi, diabetes status etc.)
+    fh = gzip.open(cov_file_path)
+    reader = csv.reader(fh, delimiter='\t')
+    header_row = reader.next()
+    #get list of covariates, ignore first column (empi)
+    cov_header = header_row[1:]
+
+    empi2cov = dict()
+    for row in tqdm(reader):
+
+        empi = row[0]
+        empi2cov[empi] = dict(zip(cov_header, row[1:]))
+
+    return empi2cov,cov_header
+
+
+#KLB hhid_4
+def load_hhid(cov_file_path):
+    """
+    Load hhid data from file.
+
+    """
+
+    print >> sys.stderr, "Loading patient household IDs..."
+    fh = gzip.open(cov_file_path)
+    reader = csv.reader(fh, delimiter='\t')
+    header_row = reader.next()
+
+    empi2hhid = dict()
+    for row in tqdm(reader):
+        empi = row[0]
+        empi2hhid[empi] = row[1]
+
+    return empi2hhid
+
 
 def load_demographics(demographic_file_path):
     """
@@ -131,7 +134,7 @@ def load_demographics(demographic_file_path):
         empi2demog[empi] = dict(zip(demog_header, row[1:]))
 
         # re-map the race codes
-        if empi2demog[empi]['race'] == 'NA':
+        if empi2demog[empi]['race'] in ('NA', 'NULL', '') :
             if empi2demog[empi]['ethnicity'] == 'W':
                 empi2demog[empi]['race'] = 'White'
             elif empi2demog[empi]['ethnicity'] == 'B':
@@ -164,7 +167,7 @@ def load_demographics(demographic_file_path):
                 empi2demog[empi]['race'] = 'Other'
 
         # recast age as float
-        empi2demog[empi]['age'] = float(empi2demog[empi]['age']) if empi2demog[empi]['age'] != 'NULL' else numpy.nan
+        empi2demog[empi]['age'] = float(empi2demog[empi]['age']) if empi2demog[empi]['age'] != 'NULL' else None
 
     print >> sys.stderr, "Loaded demographic data for %d patients." % len(empi2demog)
 
@@ -298,7 +301,9 @@ def load_generic_pedigree(generic_ped_path, empi2sex, empi2age):
 class SolarException(Exception):
     pass
 
-def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, fam2proband, use_proband, trait_type, verbose = True, family_ids_only = None):
+def build_solar_directories(h2_path, iid2ped, empi2trait,
+fam2empi, fam2count, fam2proband, use_proband, trait_type, empi2cov, cov_list, empi2hhid,
+verbose = True, family_ids_only = None):
     """
     Build the directories with files needed to run SOLAR a single time.
     """
@@ -340,17 +345,37 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, f
     solar_phen = list()
     for row in trait_ped:
         famid, iid, fid, mid, sex, age, trait = row
+        #Household ID default is mother ID
+        if empi2hhid is None:
+            solar_ped.append( [famid, iid, fid, mid, sex, mid] )
 
-        solar_ped.append( [famid, iid, fid, mid, sex] )
+        else:
+            #If missing household ID when user-defined leave blank, blank or 0 makes SOLAR assign a new unique hhid for that patient
+            solar_ped.append( [famid, iid, fid, mid, sex, empi2hhid.get(iid,'')] )
 
         if trait is None:
             trait = ''
             age = ''
 
-        if use_proband:
-            solar_phen.append([iid, trait, age, 1 if iid == fam2proband[famid] else 0])
+        if empi2cov == None:
+            if use_proband:
+                solar_phen.append([iid, trait, age, 1 if iid == fam2proband[famid] else 0])
+            else:
+                solar_phen.append([iid, trait, age])
         else:
-            solar_phen.append([iid, trait, age])
+            iidcov_dict = empi2cov.get(iid,'')
+            if use_proband:
+                holder = [iid, trait, age, 1 if iid == fam2proband[famid] else 0]
+            else:
+                holder = [iid, trait, age]
+
+            for each in cov_list:
+                if type(iidcov_dict) == dict:
+                    holder.append(iidcov_dict.get(each,''))
+                else:
+                    holder.append('')
+
+            solar_phen.append(holder)
 
     if verbose:
         print >> sys.stderr, "ok. (%d individuals in pedigree.)" % len(solar_ped)
@@ -368,24 +393,80 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, f
 
     ped_fh = open(os.path.join(solar_working_path, 'pedigree.ped'), 'w')
     writer = csv.writer(ped_fh, delimiter=',')
-    writer.writerow(['famid', 'id', 'fa', 'mo', 'sex'])
+
+    writer.writerow(['famid', 'id', 'fa', 'mo', 'sex', 'hhid'])
     writer.writerows(solar_ped)
     ped_fh.close()
 
     phen_fh = open(os.path.join(solar_working_path, 'phenotypes.phen'), 'w')
     writer = csv.writer(phen_fh, delimiter=',', quoting=csv.QUOTE_NONE)
 
-    if use_proband:
-        writer.writerow(['id', 'pheno', 'age', 'proband'])
-    else:
-        writer.writerow(['id', 'pheno', 'age'])
 
+    write_holder = ['id', 'pheno', 'age']
+    if use_proband:
+        write_holder.append('proband')
+    if cov_list != None:
+        for each in cov_list:
+            write_holder.append(each)
+
+    writer.writerow(write_holder)
     writer.writerows(solar_phen)
     phen_fh.close()
 
     if verbose:
         print >> sys.stderr, "ok."
         print >> sys.stderr, "Writing out tcl scripts to run solar...",
+
+    # the typical id used for household when it is not directly available is
+    # the mother id (mo)
+    # other options are household ID (bulidingID+SteetID+ZipCode+familyID) or familyID
+
+    #make cov_list a list if None for tcl
+
+    #normalize quant trait with inorm instead of tdist (more robust)
+    if cov_list == None:
+        cov_list = [""]
+
+    tcl_load_string = """
+    proc loadped {} {
+        load pedigree pedigree.ped
+        load phenotypes phenotypes.phen
+    }
+    """
+
+    tcl_analysis_string_b = """
+    proc runanalysis {} {
+        model new
+        trait pheno
+        covariates sex age %s
+        polygenic -screen
+    }
+
+    proc runanalysishouse {} {
+        model new
+        trait pheno
+        covariates sex age %s
+        house
+        polygenic -screen
+    }
+    """ % (" ".join(cov_list)," ".join(cov_list))
+
+    tcl_analysis_string_q = """
+    proc runanalysis {} {
+        define ipheno = inorm_pheno
+        trait ipheno
+        covariates sex age %s
+        polygenic -screen
+    }
+    proc runanalysishouse {} {
+        model new
+        define ipheno = inorm_pheno
+        trait ipheno
+        covariates sex age %s
+        house
+        polygenic -screen
+    }
+    """ % (" ".join(cov_list)," ".join(cov_list))
 
     # load_pedigree.tcl
     tcl_fh = open(os.path.join(solar_working_path, 'load_pedigree.tcl'), 'w')
@@ -410,35 +491,110 @@ def build_solar_directories(h2_path, iid2ped, empi2trait, fam2empi, fam2count, f
 
     return
 
-def extract_convered_estimates(h2r_results, edge_eps, denoise_eps):
+def extract_converged_sig_estimates(results, params, process_flag, pcutoff):
+    """
+    extracts all runs that converge and that converge and are significant
+    """
     converged = list()
-    for h2, h2err, pval in h2r_results:
-        if h2 == None or h2err == None or h2 < edge_eps or h2 > (1-edge_eps):
-            continue
+    sig_converged = list()
+    num_significant = 0
 
-        if h2err < denoise_eps*h2:
-            continue
+    if process_flag == "h2":
+        edge_eps, denoise_eps = params
 
-        converged.append( (h2, h2err, pval) )
-    return converged
+        for h2, h2_err, pval in results:
+            if h2 == None or h2_err == None or h2 < edge_eps or h2 > (1-edge_eps):
+                continue
 
-def estimate_h2o(h2r_results, ci = 95., show_warnings=True, show_errors=True):
+            if h2_err < denoise_eps*h2:
+                continue
+
+            converged.append( (h2, h2_err, pval) )
+
+            if pval < pcutoff:
+                num_significant += 1
+                sig_converged.append( (h2, h2_err, pval) )
+
+
+
+    elif process_flag == "c2":
+        edge_eps_c2, denoise_eps_c2 = params
+        #Note, edge eps and denoise eps are not estimated yet.  Placeholder = 0
+
+        for c2, c2_err, c2_pval in results:
+            if c2 == None or c2_err == None or c2 <= edge_eps_c2 or c2 >= (1-edge_eps_c2):
+                #Update <= to < and >= to > to mirror h2 formatting when c2 params estimated. Param currently 0
+                continue
+
+            if c2_err <= denoise_eps_c2*c2:
+                #Update <= to < to mirror h2 formatting when c2 params estimated.  Param currently 0
+                continue
+
+            converged.append( (c2, c2_err, c2_pval) )
+
+            if c2_pval < pcutoff:
+                num_significant += 1
+                sig_converged.append( (c2, c2_err, c2_pval) )
+
+
+
+    elif process_flag == "h2c2":
+
+        edge_eps, denoise_eps, edge_eps_c2, denoise_eps_c2 = params
+
+        for h2, h2_err, pval, c2, c2_err, c2_pval in results:
+            if h2 == None or h2_err == None or h2 < edge_eps or h2 > (1-edge_eps) or\
+            c2 == None or c2_err == None or c2 <= edge_eps_c2 or c2 >= (1-edge_eps_c2):
+            #For c2 part, update <= to < and >= to > to mirror h2 formatting when c2 params estimated. Param currently 0
+                continue
+
+            if h2_err < denoise_eps*h2 or c2_err <= denoise_eps_c2*c2:
+            #For c2 part, update <= to < to mirror h2 formatting when c2 params estimated.  Param currently 0
+                continue
+
+            converged.append( (h2, h2_err, pval, c2, c2_err, c2_pval) )
+
+            if pval < pcutoff and c2_pval < pcutoff:
+                num_significant += 1
+                sig_converged.append((h2, h2_err, pval, c2, c2_err, c2_pval))
+
+
+
+    return converged, sig_converged,  len(converged), num_significant
+
+
+
+def estimate_h2o(h2r_results, process_flag = "h2", ci = 95., show_warnings=True, show_errors=True):
 
     num_converged = 0
     num_significant = 0
     sig_h2s = list()
 
     pcutoff = 0.05
+    cidiff = (100.-ci)/2.
     edge_eps = 1e-9
     denoise_eps = 0.05
 
-    converged = extract_convered_estimates(h2r_results, edge_eps, denoise_eps)
-    num_converged = len(converged)
+    edge_eps_c2 = 0
+    denoise_eps_c2 = 0
+    #These two parameters are not estimated yet, using 0 as a placeholder
 
-    for h2, h2err, pval in converged:
-        if pval < pcutoff:
-            num_significant += 1
-            sig_h2s.append((h2, h2err, pval))
+    if process_flag == "h2":
+        params = [edge_eps, denoise_eps]
+        converged, sig_converged, num_converged , num_significant = extract_converged_sig_estimates(h2r_results, params, "h2", pcutoff)
+
+    elif process_flag == "c2":
+        params = [edge_eps_c2,denoise_eps_c2]
+        converged, sig_converged, num_converged, num_significant = extract_converged_sig_estimates(h2r_results, params, "c2", pcutoff)
+
+    elif process_flag == "h2c2":
+        params = [edge_eps, denoise_eps, edge_eps_c2, denoise_eps_c2]
+        converged, sig_converged, num_converged, num_significant = extract_converged_sig_estimates(h2r_results, params, "h2c2", pcutoff)
+# Don't have to return length of converged and significant, exclude in function
+
+    num_converged = len(converged)
+    num_significant = len(sig_converged)
+
 
     if num_significant == 0:
         if show_errors:
@@ -449,17 +605,40 @@ def estimate_h2o(h2r_results, ci = 95., show_warnings=True, show_errors=True):
         if show_warnings:
             print >> sys.stderr, "WARNING: There are fewer than 30 (%d) significant and converged estimates." % num_significant
 
-    h2o, solarerr, solarpval = sorted(sig_h2s)[len(sig_h2s)/2]
-    h2o_estimates = zip(*sig_h2s)[0]
-
-    cidiff = (100.-ci)/2.
-    h2olo = numpy.percentile(h2o_estimates, cidiff)
-    h2ohi = numpy.percentile(h2o_estimates, 100.-cidiff)
     posa = num_significant/float(num_converged)
 
-    return h2o, h2olo, h2ohi, solarerr, solarpval, num_converged, num_significant, posa
+    if process_flag == "h2" or process_flag == "c2":
+        estimate, solarerr, solarpval = sorted(sig_converged)[len(sig_converged)/2]
 
-def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts, solar_dir, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house=False, nprocs=1, verbose=False, buildonly=False):
+        estimates = zip(*sig_converged)[0]
+
+        estlo = numpy.percentile(estimates, cidiff)
+        esthi = numpy.percentile(estimates, 100.-cidiff)
+
+        return estimate, estlo, esthi, solarerr, solarpval, num_converged, num_significant, posa
+        #Update naming here
+
+    else:
+        h2o, h2_err, h2_pval, c2o, c2_err, c2_pval = sorted(sig_converged)[len(sig_converged)/2]
+
+        h2o_estimates = zip(*sig_converged)[0]
+        h2olo = numpy.percentile(h2o_estimates, cidiff)
+        h2ohi = numpy.percentile(h2o_estimates, 100.-cidiff)
+
+        c2o_estimates = zip(*sig_converged)[3]
+        c2olo = numpy.percentile(c2o_estimates, cidiff)
+        c2ohi = numpy.percentile(c2o_estimates, 100.-cidiff)
+
+
+        return h2o, h2olo, h2ohi, h2_err, h2_pval, num_converged, num_significant, posa, c2o, c2olo, c2ohi, c2_err, c2_pval
+
+
+
+
+def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts, solar_dir,
+iid2ped, all_traits, eth, fam2empi, fam2eth,all_fam2count, all_fam2proband,
+use_proband, house=False, nprocs=1, verbose=False, buildonly=False, empi2cov=None, cov_list=None, empi2hhid=None, output_fams=False):
+
     """
     Run the bootstrapping algorithm to estimate the observational heritability for both
     the AE and ACE (if house=True) models of heritability. Results of this funciton can be parsed with
@@ -468,9 +647,15 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
 
     ae_h2r_results = list()
     ace_h2r_results = list()
+    h2r_families = list()
+
     def log_solar_results(single_results):
         ae_h2r_results.append((single_results['AE']['h2r'], single_results['AE']['err'], single_results['AE']['pvalue']))
-        ace_h2r_results.append((single_results['ACE']['h2r'], single_results['ACE']['err'], single_results['ACE']['pvalue']))
+
+        ace_h2r_results.append((single_results['ACE']['h2r'], single_results['ACE']['err'], single_results['ACE']['pvalue'],single_results['ACE']['c2'], single_results['ACE']['c2_err'], single_results['ACE']['c2_pvalue']  ))
+
+        if output_fams:
+            h2r_families.append(single_results['chosen_families'])
         if verbose and not buildonly:
                 aeh2 = single_results['AE']['h2r']
                 aeer = single_results['AE']['err']
@@ -492,13 +677,24 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
                 if acepv is None:
                     acepv = numpy.nan
 
-                print >> sys.stderr, "%10s %15s %5d %5d %7.2f %7.2f %10.2e %7.2f %7.2f %10.2e %10.4f" % (icd9, eth, num_families, len(ae_h2r_results), aeh2, aeer, aepv, aceh2, aceer, acepv, single_results['APF'])
+                acec2 = single_results['ACE']['c2']
+                acec2er = single_results['ACE']['c2_err']
+                acec2pv = single_results['ACE']['c2_pvalue']
+                if acec2 is None:
+                    acec2 = numpy.nan
+                if acec2er is None:
+                    acec2er = numpy.nan
+                if acec2pv is None:
+                    acec2pv = numpy.nan
+
+                print >> sys.stderr, "%10s %15s %5d %5d %7.2f %7.2f %10.2e %7.2f %7.2f %10.2e %7.2f %7.2f %10.2e %10.4f" % (icd9, eth, num_families, len(ae_h2r_results), aeh2, aeer, aepv, aceh2, aceer, acepv, acec2, acec2er, acec2pv, single_results['APF'])
 
     if num_families > len(families_with_case[icd9]):
         print >> sys.stderr, "Number of families to be sampled (%d) is larger than what is available (%d)." % (num_families, len(families_with_case[icd9]))
     else:
+
         if verbose and not buildonly:
-            print >> sys.stderr, "%10s %15s %5s %5s %7s %7s %10s %7s %7s %10s %10s" % ('Trait', 'Ethnicity', 'NFam', 'Samp', 'AE h2', 'err', 'pval', 'ACE h2', 'err', 'pval', 'Sample AFP')
+            print >> sys.stderr, "%10s %15s %5s %5s %4s %5s %7s %5s %3s %4s %15s %6s %7s %10s" % ('Trait', 'Ethnicity', 'NFam', 'Samp', 'AE h2', 'err', 'pval', 'ACE h2', 'err', 'pval','Shared Env c2', 'c2 err', 'c2 pval', 'Sample AFP')
 
         pool = mp.Pool(nprocs)
 
@@ -519,7 +715,11 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
                             use_proband,
                             house,
                             verbose,
-                            buildonly)
+                            buildonly,
+                            empi2cov,
+                            cov_list,
+                            empi2hhid,
+                            output_fams)
             if nprocs == 1:
                 log_solar_results(solar(*solar_args))
             else:
@@ -528,20 +728,24 @@ def solar_strap(num_families, families_with_case, icd9, trait_type, num_attempts
         pool.close()
         pool.join()
 
-    return ae_h2r_results, ace_h2r_results
 
-def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, all_traits, eth, fam2empi, fam2eth, all_fam2count, all_fam2proband, use_proband, house, verbose, buildonly):
+    return ae_h2r_results, ace_h2r_results, h2r_families
+
+def solar(h2_path, families_with_case, icd9, trait_type, num_families,
+iid2ped, all_traits, eth, fam2empi, fam2eth,all_fam2count, all_fam2proband,
+use_proband, house, verbose, buildonly, empi2cov, cov_list, empi2hhid, output_fams):
     """
     Setup the data for solar and run solar for the given condition.
 
     """
 
-    # if the h2_path exists, we remove it
-    if os.path.exists(h2_path):
+    #if the h2_path exists, we remove it
+    if not buildonly and os.path.exists(h2_path):
         shutil.rmtree(h2_path)
 
     available_families = [fid for fid in families_with_case[icd9] if eth == 'ALL' or fam2eth[fid] == eth]
     chosen_families = random.sample(available_families, num_families)
+
     if trait_type == TRAIT_TYPE_BINARY:
         apf = numpy.mean([numpy.sum([all_traits[icd9].get(iid, 0) for iid in fam2empi[famid]]) for famid in chosen_families])
     elif trait_type == TRAIT_TYPE_QUANTITATIVE:
@@ -555,16 +759,28 @@ def solar(h2_path, families_with_case, icd9, trait_type, num_families, iid2ped, 
                            all_fam2proband[icd9],
                            use_proband,
                            trait_type,
+                           empi2cov,
+                           cov_list,
+                           empi2hhid,
                            verbose=False, # this one is kindof annoying if it is on
                            family_ids_only=chosen_families)
 
     if not buildonly:
         #print >> sys.stderr, h2_path
-        results = single_solar_run(h2_path, house, verbose)
+
+        results = single_solar_run(h2_path, trait_type, house, verbose)
         results['APF'] = apf
+
+        if output_fams:
+            results["chosen_families"] = chosen_families
+        #Deletes directory
         shutil.rmtree(h2_path)
     else:
-        results = {'AE':{'h2r':None, 'err':None, 'pvalue':None}, 'ACE':{'h2r':None, 'err':None, 'pvalue':None}, 'APF': apf}
+
+        results = {'AE':{'h2r':None, 'err':None, 'pvalue':None}, 'ACE':{'h2r':None, 'err':None, 'pvalue':None, 'c2':None, 'c2_err':None, 'c2_pvalue':None}, 'APF': apf}
+
+        if output_fams:
+            results["chosen_families"] = chosen_families
 
     return results
 
@@ -576,10 +792,12 @@ def parse_polygenic_out(polygenic_out_fn, verbose):
     if not os.path.exists(polygenic_out_fn):
         print >> sys.stderr, "WARNING: No polygenic outfile found at: %s" % polygenic_out_fn
         h2r, h2r_err, p = None, None, None
+
     else:
         polygenic_out_fh = open(polygenic_out_fn)
         results = polygenic_out_fh.read().split('\n')
         h2r_raw = [row.strip() for row in results if row.find('H2r') != -1]
+
         try:
             h2r = float(h2r_raw[0].split()[2])
             p = float(h2r_raw[0].split()[5])
@@ -595,9 +813,29 @@ def parse_polygenic_out(polygenic_out_fn, verbose):
         except IndexError:
             h2r_err = None
 
-    return {'h2r':h2r, 'err':h2r_err, 'pvalue':p}
+        c2_raw = [row.strip() for row in results if row.find('C2') != -1]
 
-def single_solar_run(h2_path, house=False, verbose=False, really_verbose=False):
+        try:
+            c2 = float(c2_raw[0].split()[2])
+            c2_pval = float(c2_raw[0].split()[5])
+
+        #NOTE There is sometimes no standard error in c2 output!
+        except IndexError:
+            if verbose:
+                print >> sys.stderr, "SOLAR failed to converge on a shared environment estimate. Could be a convergence error."
+            c2 = None
+            c2_pval = None
+        c2_err = None
+
+        try:
+            c2_err = float(c2_raw[1].split()[3])
+        except (ValueError, IndexError):
+            c2_raw = None
+
+
+    return {'h2r':h2r, 'err':h2r_err, 'pvalue':p,'c2':c2, 'c2_err':c2_err, 'c2_pvalue':c2_pval }
+
+def single_solar_run(h2_path, trait_type, house=False, verbose=False, really_verbose=False):
     """
     Runs solar for the AE and ACE (if house=True) models, returns parsed results.
 
@@ -617,6 +855,10 @@ def single_solar_run(h2_path, house=False, verbose=False, really_verbose=False):
 
     polygenic_out_fn = os.path.join(solar_working_path, 'pheno', 'polygenic.out')
 
+
+    if trait_type == TRAIT_TYPE_QUANTITATIVE:
+        polygenic_out_fn = os.path.join(solar_working_path, 'ipheno', 'polygenic.out')
+
     ae_results = parse_polygenic_out(polygenic_out_fn, verbose=really_verbose)
 
     if house:
@@ -625,12 +867,14 @@ def single_solar_run(h2_path, house=False, verbose=False, really_verbose=False):
             print >> sys.stderr, "cd %s > /dev/null && solar runanalysishouse > /dev/null && cd - > /dev/null " % solar_working_path
         os.system("cd %s > /dev/null && solar runanalysishouse > /dev/null && cd - > /dev/null " % solar_working_path)
         ace_results = parse_polygenic_out(polygenic_out_fn, verbose=really_verbose)
+
     else:
-        ace_results = {'h2r':None, 'err':None, 'pvalue':None}
+
+        ace_results = {'h2r':None, 'err':None, 'pvalue':None, 'c2':None,  'c2_err':None, 'c2_pvalue':None }
 
     if really_verbose:
         print >> sys.stderr, 'AE', "%(h2r)s %(err)s %(pvalue)s" % ae_results
         if house:
-            print >> sys.stderr, 'ACE', "%(h2r)s %(err)s %(pvalue)s" % ace_results
+            print >> sys.stderr, 'ACE', "%(h2r)s %(err)s %(pvalue)s %(c2)s %(c2_err)s %(c2_pvalue)s" % ace_results
 
     return {'AE': ae_results, 'ACE': ace_results}

@@ -5,14 +5,14 @@ solarStrap_heritability.py
 
 Compute heritability for one or more traits.
 
-@author Nicholas P. Tatonetti, Rami Vanguri
+@author Nicholas P. Tatonetti, Rami Vanguri, Katie LaRow Brown
 
 USAGE EXAMPLE
 -------------
-python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [nfam=0.15] [sd=path/to/working_directory] [ace=no] [verbose=no] [samples=200] [buildonly=no] [proband=yes]
+python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [hhid=household_id.txt.gz] [cov=covatiates.txt.gz] [nfam=0.15] [sd=path/to/working_directory] [ace=no] [verbose=no] [samples=200] [buildonly=no] [proband=yes] [outputfams=no] [h2c2coprocess=yes]
 
 """
-__version__ = 0.9
+__version__ = 1.0
 
 
 import os
@@ -34,6 +34,9 @@ from h2o_utility import load_demographics
 from h2o_utility import load_family_ids
 from h2o_utility import load_relationships
 from h2o_utility import load_generic_pedigree
+from h2o_utility import load_covariates
+from h2o_utility import load_hhid
+
 
 from h2o_utility import build_solar_directories
 from h2o_utility import single_solar_run
@@ -48,7 +51,10 @@ from h2o_utility import TRAIT_TYPE_QUANTITATIVE
 
 common_data_path = ''
 
-def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False, house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False, use_proband=True):
+
+def main(demographic_file, family_file, pedigree_file, trait_path, cov_file, hhid_file,
+solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False,
+house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False, use_proband=True,output_fams=False,h2c2_coprocess=True):
 
     if trait_type == 'D':
         trait_type_code = TRAIT_TYPE_BINARY
@@ -77,12 +83,30 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
     demog_file_path = os.path.join(common_data_path, demographic_file)
     empi2demog = load_demographics(demog_file_path)
 
+
     # set up some convenience dictionaries
     empi2sex = dict()
     empi2age = dict()
     for empi, data in empi2demog.items():
         empi2sex[empi] = data['sex']
         empi2age[empi] = data['age'] if not data['age'] == 'NULL' else ''
+
+    #load covariates data
+    if cov_file != None:
+        cov_file_path = os.path.join(common_data_path, cov_file)
+        empi2cov,cov_list = load_covariates(cov_file_path)
+    else:
+        empi2cov = None
+        cov_list = None
+
+    #load household ID data
+    if hhid_file != None:
+        hhid_file_path = os.path.join(common_data_path, hhid_file)
+        empi2hhid = load_hhid(hhid_file_path)
+
+    else:
+        empi2hhid = None
+
 
     print >> sys.stderr, "Loading phenotype (trait) data..."
     all_traits = defaultdict(dict)
@@ -204,11 +228,11 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
 
     results_file = open(os.path.join(solar_dir, '%s_solar_strap_results.csv' % prefix), 'w')
     results_writer = csv.writer(results_file)
-    results_writer.writerow(['trait', 'ethnicity', 'num_families', 'model', 'h2o', 'h2o_lower', 'h2o_upper', 'solarerr', 'solarpval', 'num_attempts', 'num_converged', 'num_significant', 'posa'])
+    results_writer.writerow(['trait', 'ethnicity', 'num_families', 'model', 'estimate', 'estimate_lower', 'estimate_upper', 'solarerr', 'solarpval', 'num_attempts', 'num_converged', 'num_significant', 'posa'])
 
     runs_file = open(os.path.join(solar_dir, '%s_solar_strap_allruns.csv' % prefix), 'w')
     runs_writer = csv.writer(runs_file)
-    runs_writer.writerow(['trait', 'ethnicity', 'num_families', 'model', 'h2o', 'solarerr', 'pvalue'])
+    runs_writer.writerow(['trait', 'ethnicity', 'num_families', 'model', 'estimate', 'solarerr', 'pvalue'])
 
     if num_families_range is None:
         num_families_range = [0.15,]
@@ -241,7 +265,8 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                     print >> sys.stderr, "Not enough families available, skipping."
                     continue
 
-                ae_h2r_results, ace_h2r_results = solar_strap(num_families,
+                #Note, h2r_families is an empty list unless output_fams is selected
+                ae_h2r_results, ace_h2r_results, h2r_families = solar_strap(num_families,
                                                               families_with_case[eth],
                                                               icd9,
                                                               trait_type_code,
@@ -258,31 +283,79 @@ def main(demographic_file, family_file, pedigree_file, trait_path, solar_dir, tr
                                                               house,
                                                               nprocs,
                                                               verbose,
-                                                              buildonly)
-                for h2o, err, pval in ae_h2r_results:
-                    runs_writer.writerow([icd9, eth, num_families, 'AE', h2o, err, pval])
+                                                              buildonly,
+                                                              empi2cov,
+                                                              cov_list,
+                                                              empi2hhid,
+                                                              output_fams)
 
-                estimates = estimate_h2o(ae_h2r_results)
-                if estimates:
-                    h2o, h2olo, h2ohi, solarerr, solarpval, num_converged, num_significant, posa = estimates
-                    print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'AE', h2o, solarerr, solarpval, num_attempts, num_converged, num_significant, posa)
-                    results_writer.writerow([icd9, eth, num_families, 'AE', h2o, h2olo, h2ohi, solarerr, solarpval, num_attempts, num_converged, num_significant, posa])
+
+                for h2o, h2_err, h2_pval in ae_h2r_results:
+                    runs_writer.writerow([icd9, eth, num_families, 'AE', h2o, h2_err, h2_pval])
+
+                if output_fams:
+                    includedfam_file = open(os.path.join(solar_dir, '%s_solar_strap_includedfam.csv' % prefix), 'w')
+                    fams_writer = csv.writer(includedfam_file)
+                    fams_writer.writerow(['iteration', 'families'])
+
+                    for cnt, fams in enumerate(h2r_families):
+                        for fam in fams:
+                            fams_writer.writerow([cnt, fam])
+
+                    includedfam_file.close()
+
+
+                ae_h2_estimate = estimate_h2o(ae_h2r_results, "h2")
+                if ae_h2_estimate:
+                    h2o, h2olo, h2ohi, h2_err, h2_pval, num_converged, num_significant, posa = ae_h2_estimate
+                    print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'AE', h2o, h2_err, h2_pval, num_attempts, num_converged, num_significant, posa)
+                    results_writer.writerow([icd9, eth, num_families, 'AE', h2o, h2olo, h2ohi, h2_err, h2_pval, num_attempts, num_converged, num_significant, posa])
 
                 if house:
-                    for h2o, err, pval in ace_h2r_results:
-                        runs_writer.writerow([icd9, eth, num_families, 'ACE', h2o, err, pval])
 
-                    estimates = estimate_h2o(ace_h2r_results)
-                    if estimates:
-                        h2o, h2olo, h2ohi, solarerr, solarpval, num_converged, num_significant, posa = estimates
-                        print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'ACE', h2o, solarerr, solarpval, num_attempts, num_converged, num_significant, posa)
-                        results_writer.writerow([icd9, eth, num_families, 'ACE', h2o, h2olo, h2ohi, solarerr, solarpval, num_attempts, num_converged, num_significant, posa])
+                    for h2o, h2_err, h2_pval, c2, c2_err, c2_pval in ace_h2r_results:
+                        runs_writer.writerow([icd9, eth, num_families, 'ACE_h2o', h2o, h2_err, h2_pval])
+                        runs_writer.writerow([icd9, eth, num_families, 'ACE_Shared_Env', c2, c2_err, c2_pval])
+
+                    if h2c2_coprocess:
+                        #h2 and c2 are processed together, so runs mush have h2 AND c2 converged and significant, median h2 selected and corresponding c2 (so explained variance of c2 and h2 adds to <= 1)
+                        h2c2_estimates = estimate_h2o(ace_h2r_results, "h2c2")
+
+                        if h2c2_estimates:
+                            h2o, h2olo, h2ohi, h2_err, h2_pval, num_converged, num_significant, posa, c2o, c2olo, c2ohi, c2_err, c2_pval = h2c2_estimates
+
+                            print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'ACE_h2o', h2o,  h2_err, h2_pval, num_attempts, num_converged, num_significant, posa)
+                            results_writer.writerow([icd9, eth, num_families, 'ACE_h2o', h2o, h2olo, h2ohi, h2_err, h2_pval, num_attempts, num_converged, num_significant, posa])
+
+
+                            print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'ACE_Shared_Env', c2o, c2_err, c2_pval, num_attempts, num_converged, num_significant, posa)
+                            results_writer.writerow([icd9, eth, num_families, 'ACE_Shared_Env', c2o, c2olo, c2ohi, c2_err, c2_pval, num_attempts, num_converged, num_significant, posa])
+
+
+                    else:
+                        #h2 and c2 are processed seperately, so h2 is all sig and converged runs according to h2 only and it's the median h2 value.  Repeat with C2
+                        h2_estimate = estimate_h2o([e[0:3] for e in ace_h2r_results],"h2")
+
+                        if h2_estimate:
+                            h2o, h2olo, h2ohi, h2_err, h2_pval, num_converged, num_significant, posa = h2_estimate
+                            print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'ACE_h2o', h2o, h2_err, h2_pval, num_attempts, num_converged, num_significant, posa)
+                            results_writer.writerow([icd9, eth, num_families, 'ACE_h2o', h2o, h2olo, h2ohi, h2_err, h2_pval, num_attempts, num_converged, num_significant, posa])
+
+
+                        c2_estimate = estimate_h2o([e[3:] for e in ace_h2r_results], "c2")
+                        if c2_estimate:
+                            c2o, c2olo, c2ohi, c2_err, c2_pval, num_converged, num_significant, posa = c2_estimate
+                            print "%10s %10s %5d %4s %7.2f %7.2f %7.2e %7d %7d %7d %7.2f" % (icd9, eth, num_families, 'ACE_Shared_Env', c2o, c2_err, c2_pval, num_attempts, num_converged, num_significant, posa)
+                            results_writer.writerow([icd9, eth, num_families, 'ACE_Shared_Env', c2o, c2olo, c2ohi, c2_err, c2_pval, num_attempts, num_converged, num_significant, posa])
+
 
         # clean up
-        shutil.rmtree(icd9_path)
+        if not buildonly:
+            shutil.rmtree(icd9_path)
 
     results_file.close()
     runs_file.close()
+
 
 if __name__ == '__main__':
     args = dict([x.split('=') for x in sys.argv[1:]])
@@ -300,8 +373,8 @@ if __name__ == '__main__':
     print >> sys.stderr, "Results from each bootstrap will be saved at %(sd)s/%(name)s_solar_strap_allruns.csv" % args
     print >> sys.stderr, ""
 
-    valid_args = ('demog', 'fam', 'ped', 'trait', 'sd', 'type', 'nfam', 'slice',
-        'eth', 'verbose', 'ace', 'name', 'nprocs','samples', 'buildonly', 'proband')
+    valid_args = ('demog', 'fam', 'ped', 'trait', 'cov','hhid', 'sd', 'type', 'nfam', 'slice',
+        'eth', 'verbose', 'ace', 'name', 'nprocs','samples', 'buildonly', 'proband','outputfams',"h2c2coprocess")
     for argname in args.keys():
         if not argname in valid_args:
             raise Exception("Provided argument: `%s` is not a valid argument name." % argname)
@@ -310,6 +383,8 @@ if __name__ == '__main__':
         family_file = args['fam'],
         pedigree_file = args['ped'],
         trait_path = args['trait'],
+        cov_file = None if not 'cov' in args else args['cov'],
+        hhid_file = None if not 'hhid' in args else args['hhid'],
         solar_dir = args['sd'],
         trait_type = args['type'],
         num_families_range = None if not 'nfam' in args else map(float, args['nfam'].split(',')),
@@ -321,4 +396,6 @@ if __name__ == '__main__':
         nprocs = 1 if not 'nprocs' in args else int(args['nprocs']),
         num_attempts = 200 if not 'samples' in args else int(args['samples']),
         buildonly = False if not 'buildonly' in args else args['buildonly'].lower() == 'yes',
-        use_proband = True if not 'proband' in args else args['proband'].lower() == 'yes')
+        use_proband = True if not 'proband' in args else args['proband'].lower() == 'yes',
+        output_fams = False if not 'outputfams' in args else args['outputfams'].lower() == 'yes',
+        h2c2_coprocess = True if not "h2c2coprocess" in args else args['h2c2coprocess'].lower() == 'yes' )
