@@ -111,7 +111,7 @@ ptid	covariate_1
 ```
 
 ### Household file
-The household file is a gzipped tab delimited file containing at least 2 columns: the `individual_id` and the individual's `household_id`.  Unknown individuals can just be excluded from the file or given an empty string value.  SOLARStrap will assign a unique household identifier for these patients. Do NOT use for these patients `NULL`.
+The household file is a gzipped tab delimited file containing at least 2 columns: the `individual_id` and the individual's `household_id`.  Unknown individuals can just be excluded from the file or given an empty string value.  SOLARStrap will assign a unique household identifier for these patients. Do NOT use for these patients `NULL`. If no household file is provided but an ACE model is selected, SOLARStrap will use the patient's `mother_id` as their `household_id`. 
 
 ```
 ptid	household_id
@@ -160,7 +160,6 @@ Results from each bootstrap will be saved at ./working/F6ZF3_solar_strap_allruns
 ```
 
 If you run solar in verbose mode you will see a log of the h2 estimates from SOLAR if SOLARStrap is running successfully.
-
 ```
 Number of families with case: 3686
      Trait       Ethnicity  NFam  Samp   AE h2     err       pval  ACE h2     err       pval Sample AFP
