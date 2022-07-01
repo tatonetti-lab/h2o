@@ -19,12 +19,16 @@ Estimating observational heritability using SOLARStrap requires four data files.
 2. Patient demographics
 3. Family identifiers
 4. Pedigree file
+5. Covariates file (optional)
+6. Household file (optional)
+
+Note, the script is dependent on column order and not column title. For example in the trait file below, the first column needs to include the patient identifier, it does not need to be titled ptid though (pid, individual_id etc are all fine.)
 
 ### Trait File
 
-The trait file is a gzipped tab delimited file containing three columns: `ptid`, `pheno`, and `value`. The `ptid` is a local identifier for the patient. The `pheno` is a unique identifier for the trait (e.g. an ICD9/10 code, a LOINC code, or a local identifier). The `value` is either `1`, `0`, or `NA` if the trait is dichotomous or the quantitative value if the trait is quantiative (again with `NA` used if the value is unknown). Note that all individuals in the pedigree that are not in the trait file will be assigned `NA` as the trait value.
+The trait file is a gzipped tab delimited file containing three columns: `ptid`, `pheno`, and `value`. The `ptid` is a local identifier for the patient. The `pheno` is a unique identifier for the trait (e.g. an ICD9/10 code, a LOINC code, or a local identifier). The `value` is either `1` or`0` if the trait is dichotomous or the quantitative value if the trait is quantiative (unknown patients should be excluded from the trait file, but can be included in the pedigree and family file). Note that all individuals in the pedigree that are not in the trait file will be assigned `NA` as the trait value.
 
-More than one trait can be coded in a single trait file. In this case SOLARStrap will run heritability estimates for all traits in the file. 
+More than one trait can be coded in a single trait file. In this case SOLARStrap will run heritability estimates for all traits in the file.
 
 `gzcat example/rhinitis/67_trait_data.txt.gz | head`
 
@@ -43,7 +47,7 @@ ptid	pheno	value
 
 ### Patient Demographics
 
-The patient demographics file is a gzipped tab delimited file containing 6 columns: `ptid`, `sex`, `birth_decade`, `race_code`, `ethnic_code`, and `age`. If any of the information is unknown it is coded as `NULL`. Birth decade is not used at this time. `race_code` may be one of `NA` or `U` (unknown), `W` (white), or `B` (black). `ethnic_code` represents self-reporting of hispanic or not hispanic -- `H`, `S`, `O` will all be mapped to hispanic, other codes to non-hispanic. The `race_code` and the `ethnic_code` are used together to group patients and families into self-reported race/ethnicity groups. An `ethnic_code` of hispanic overrides the reported race and a `race_code` will be mapped to hispanic. Note thate this logic is built for the demographic diversity of New York City. Uses in other areas may require different logic. In this case you may want to edit the `load_demographics` method in `h2o_utility.py`. 
+The patient demographics file is a gzipped tab delimited file containing 6 columns: `ptid`, `sex`, `birth_decade`, `race_code`, `ethnic_code`, and `age`. If `sex`,`race_code`, or `age` is unknown it is coded as `NULL`. If `ethnic_code` is unknown it should be coded as `U`. Birth decade is not used at this time. `race_code` may be one of `NA` or `NULL` (unknown), `W` (white), or `B` (black). `ethnic_code` represents self-reporting of hispanic or not hispanic -- `H`, `S`, `O` will all be mapped to hispanic, other codes to non-hispanic. The `race_code` and the `ethnic_code` are used together to group patients and families into self-reported race/ethnicity groups. An `ethnic_code` of hispanic overrides the reported race and a `race_code` will be mapped to hispanic. Note that this logic is built for the demographic diversity of New York City. Uses in other areas may require different logic. In this case you may want to edit the `load_demographics` method in `h2o_utility.py`.
 
 ```
 ptid	sex	birth_decade	race_code	ethnic_code	age
@@ -61,7 +65,7 @@ ptid	sex	birth_decade	race_code	ethnic_code	age
 
 ### Family Identifiers
 
-The family identifiers file is a gzipped tab delimited file containing two columns: `famid` and `ptid`. 
+The family identifiers file is a gzipped tab delimited file containing two columns: `famid` and `ptid`. All patients in the family file must also be in the pedigree.
 
 ```
 famid   ptid
@@ -95,6 +99,28 @@ family_id	individual_id	father_id	mother_id	own_ancestor
 30000854	3000370361	0	0	0
 ```
 
+### Covariates file
+The covariates file is a gzipped tab delimited file containing at least 2 columns: the `individual_id` and at least one column with the covariate (more than 1 covariate column allowed)
+
+```
+ptid	covariate_1
+3000149927      1
+3000191095      0
+3000276396      0
+3000181834      1
+```
+
+### Household file
+The household file is a gzipped tab delimited file containing at least 2 columns: the `individual_id` and the individual's `household_id`.  Unknown individuals can just be excluded from the file or given an empty string value.  SOLARStrap will assign a unique household identifier for these patients. Do NOT use for these patients `NULL`.
+
+```
+ptid	household_id
+3000149927      10456
+3000191095      57623
+3000276396      10456
+3000181834      83215
+```
+
 ### Running SOLARStrap
 
 There are five required arguments when running SOLARStrap, `trait`, `demog`, `fam`, `ped`, and `type`. The first four are paths to the trait, demographics, family ids, and pedigree files (as described above). `type` is either `D` for dichotomous or `Q` for quantitative. Here is an example using rhinitis. You will be prompted to make a `./working` directory, do so with `mkdir working`.
@@ -103,27 +129,31 @@ There are five required arguments when running SOLARStrap, `trait`, `demog`, `fa
 python src/solarStrap_heritability.py trait=example/rhinitis/67_trait_data.txt.gz demog=example/rhinitis/patient_demog_data_with_age.txt.gz fam=example/rhinitis/family_ids.txt.gz ped=example/rhinitis/west_generic_pedigree_file.txt.gz type=D
 ```
 
-The remaining arguments are optional. They are 
+The remaining arguments are optional. They are
 ```
+-`cov`   file path to Covariates file
+-`hhid`   file path to Household file
 - `ace`       Set to `yes` to run estimates modeling the household effect. The mother id will be used as the household id. Default is `no`.
 - `verbose`   Set to `yes` to see a lot more output. Default is `no`.
 - 'nfam`      The number of families to be sampled in each iteration, can be a float (proportion of total families) or an integer. Default is `0.15` (15%).
-- `samples`   The number of iterations to run. Default is `200`. 
+- `samples`   The number of iterations to run. Default is `200`.
 - `buildonly` Set to yes to only build the directories, do not run SOLAR. Default is `no`.
 - `proband`   Set to yes to use a proband. Default is `yes`.
 - `sd`        The path to the working directory. Default is `./working`.
+-`h2c2coprocess`    Only used when modeling household effect (ace is yes). If `no`, the final h2 and c2 are selected separately where the median c2 and median h2 are selected from the models that have a significant c2 estimate or h2 estimate respectively. Default is 'yes'. `no` should generally just be used when estimating c2 and there is no expected h2.
+-`outputfams`    Default is 'no'. Include a list of included families for each iteration of SOLAR.
 ```
 
 ### Output files
 
-In addition to the error and log messages that are printed to the screen, SOLARStrap will produce two results files: (1) a file of aggregated results (these are the h2o estimates) and (2) a log of all of the heritability estimates for each iteration. The former is aggregated version of the latter. 
+In addition to the error and log messages that are printed to the screen, SOLARStrap will produce two results files: (1) a file of aggregated results (these are the h2o estimates) and (2) a log of all of the heritability estimates for each iteration. The former is aggregated version of the latter.
 
 These files will be placed in the working directory provided to SOLARStrap when run (default is `./working`). In addition, when SOLARStrap is run it will print out the path where these files will be saved and their names. For example:
 
 `python src/solarStrap_heritability.py trait=example/rhinitis/67_trait_data.txt.gz demog=example/rhinitis/patient_demog_data_with_age.txt.gz fam=example/rhinitis/family_ids.txt.gz ped=example/rhinitis/west_generic_pedigree_file.txt.gz type=D verbose=yes ace=yes`
 
 ```
-SolarStrap v 0.9 - Estimate heritability of disease using observational data.
+SolarStrap v 1.0 - Estimate heritability and shared environment of disease using observational data.
 -----------------------------------------------------------------------------
 Summary results will be saved in ./working/F6ZF3_solar_strap_results.csv
 Results from each bootstrap will be saved at ./working/F6ZF3_solar_strap_allruns.csv
