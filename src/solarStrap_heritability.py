@@ -12,7 +12,7 @@ USAGE EXAMPLE
 python solarStrap_heritability.py trait=path/to/traitfile.txt.gz type=D demog=demogtable.txt.gz fam=family_ids.txt.gz ped=generic_pedigree.txt.gz [hhid=household_id.txt.gz] [cov=covatiates.txt.gz] [nfam=0.15] [sd=path/to/working_directory] [ace=no] [verbose=no] [samples=200] [buildonly=no] [proband=yes] [outputfams=no] [h2c2coprocess=yes]
 
 """
-__version__ = 1.0
+__version__ = 1.1
 
 
 import os
@@ -54,7 +54,8 @@ common_data_path = ''
 
 def main(demographic_file, family_file, pedigree_file, trait_path, cov_file, hhid_file,
 solar_dir, trait_type, num_families_range, diag_slice=None, ethnicities=None, verbose=False,
-house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False, use_proband=True,output_fams=False,h2c2_coprocess=True):
+house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False, use_proband=True,
+output_fams=False,h2c2_coprocess=True, age_cov=True, sex_cov=True):
 
     if trait_type == 'D':
         trait_type_code = TRAIT_TYPE_BINARY
@@ -97,7 +98,14 @@ house=False, prefix='', nprocs=1, num_attempts=200, buildonly=False, use_proband
         empi2cov,cov_list = load_covariates(cov_file_path)
     else:
         empi2cov = None
-        cov_list = None
+        cov_list = []
+
+    #KLB Add sex/age to covariates list if including in analysis
+    if age_cov is True:
+        cov_list.insert(0,"age")
+
+    if sex_cov is True:
+        cov_list.insert(0,"sex")
 
     #load household ID data
     if hhid_file != None:
@@ -374,7 +382,8 @@ if __name__ == '__main__':
     print >> sys.stderr, ""
 
     valid_args = ('demog', 'fam', 'ped', 'trait', 'cov','hhid', 'sd', 'type', 'nfam', 'slice',
-        'eth', 'verbose', 'ace', 'name', 'nprocs','samples', 'buildonly', 'proband','outputfams',"h2c2coprocess")
+        'eth', 'verbose', 'ace', 'name', 'nprocs','samples', 'buildonly', 'proband','outputfams','h2c2coprocess',
+        'exclude_age_cov', 'exclude_sex_cov')
     for argname in args.keys():
         if not argname in valid_args:
             raise Exception("Provided argument: `%s` is not a valid argument name." % argname)
@@ -398,4 +407,6 @@ if __name__ == '__main__':
         buildonly = False if not 'buildonly' in args else args['buildonly'].lower() == 'yes',
         use_proband = True if not 'proband' in args else args['proband'].lower() == 'yes',
         output_fams = False if not 'outputfams' in args else args['outputfams'].lower() == 'yes',
-        h2c2_coprocess = True if not "h2c2coprocess" in args else args['h2c2coprocess'].lower() == 'yes' )
+        h2c2_coprocess = True if not "h2c2coprocess" in args else args['h2c2coprocess'].lower() == 'yes',
+        age_cov = True if not 'exclude_age_cov' in args else args['exclude_age_cov'].lower() == 'no',
+        sex_cov = True if not 'exclude_sex_cov' in args else args['exclude_sex_cov'].lower() == 'no' )

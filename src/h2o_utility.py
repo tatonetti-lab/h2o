@@ -424,8 +424,6 @@ verbose = True, family_ids_only = None):
     #make cov_list a list if None for tcl
 
     #normalize quant trait with inorm instead of tdist (more robust)
-    if cov_list == None:
-        cov_list = [""]
 
     tcl_load_string = """
     proc loadped {} {
@@ -433,40 +431,70 @@ verbose = True, family_ids_only = None):
         load phenotypes phenotypes.phen
     }
     """
+    if len(cov_list) == 0:
+        tcl_analysis_string_b = """
+        proc runanalysis {} {
+            model new
+            trait pheno
+            polygenic -screen
+        }
 
-    tcl_analysis_string_b = """
-    proc runanalysis {} {
-        model new
-        trait pheno
-        covariates sex age %s
-        polygenic -screen
-    }
+        proc runanalysishouse {} {
+            model new
+            trait pheno
+            house
+            polygenic -screen
+        }
+        """
 
-    proc runanalysishouse {} {
-        model new
-        trait pheno
-        covariates sex age %s
-        house
-        polygenic -screen
-    }
-    """ % (" ".join(cov_list)," ".join(cov_list))
+        tcl_analysis_string_q = """
+        proc runanalysis {} {
+            define ipheno = inorm_pheno
+            trait ipheno
+            polygenic -screen
+        }
+        proc runanalysishouse {} {
+            model new
+            define ipheno = inorm_pheno
+            trait ipheno
+            house
+            polygenic -screen
+        }
+        """
+    else:
+        tcl_analysis_string_b = """
+        proc runanalysis {} {
+            model new
+            trait pheno
+            covariates sex age %s
+            polygenic -screen
+        }
 
-    tcl_analysis_string_q = """
-    proc runanalysis {} {
-        define ipheno = inorm_pheno
-        trait ipheno
-        covariates sex age %s
-        polygenic -screen
-    }
-    proc runanalysishouse {} {
-        model new
-        define ipheno = inorm_pheno
-        trait ipheno
-        covariates sex age %s
-        house
-        polygenic -screen
-    }
-    """ % (" ".join(cov_list)," ".join(cov_list))
+        proc runanalysishouse {} {
+            model new
+            trait pheno
+            covariates sex age %s
+            house
+            polygenic -screen
+        }
+        """ % (" ".join(cov_list)," ".join(cov_list))
+
+        tcl_analysis_string_q = """
+        proc runanalysis {} {
+            define ipheno = inorm_pheno
+            trait ipheno
+            covariates sex age %s
+            polygenic -screen
+        }
+        proc runanalysishouse {} {
+            model new
+            define ipheno = inorm_pheno
+            trait ipheno
+            covariates sex age %s
+            house
+            polygenic -screen
+        }
+        """ % (" ".join(cov_list)," ".join(cov_list))
 
     # load_pedigree.tcl
     tcl_fh = open(os.path.join(solar_working_path, 'load_pedigree.tcl'), 'w')
