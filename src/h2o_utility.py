@@ -370,10 +370,14 @@ verbose = True, family_ids_only = None):
                 holder = [iid, trait, age]
 
             for each in cov_list:
-                if type(iidcov_dict) == dict:
-                    holder.append(iidcov_dict.get(each,''))
+                #legacy code already adds sex and age to pedigree (sex) and age (pheno) files
+                if each in ["sex", "age"]:
+                    continue
                 else:
-                    holder.append('')
+                    if type(iidcov_dict) == dict:
+                        holder.append(iidcov_dict.get(each,''))
+                    else:
+                        holder.append('')
 
             solar_phen.append(holder)
 
@@ -466,14 +470,14 @@ verbose = True, family_ids_only = None):
         proc runanalysis {} {
             model new
             trait pheno
-            covariates sex age %s
+            covariates %s
             polygenic -screen
         }
 
         proc runanalysishouse {} {
             model new
             trait pheno
-            covariates sex age %s
+            covariate %s
             house
             polygenic -screen
         }
@@ -483,14 +487,14 @@ verbose = True, family_ids_only = None):
         proc runanalysis {} {
             define ipheno = inorm_pheno
             trait ipheno
-            covariates sex age %s
+            covariates %s
             polygenic -screen
         }
         proc runanalysishouse {} {
             model new
             define ipheno = inorm_pheno
             trait ipheno
-            covariates sex age %s
+            covariates %s
             house
             polygenic -screen
         }
